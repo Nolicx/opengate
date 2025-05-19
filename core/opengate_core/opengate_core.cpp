@@ -419,6 +419,8 @@ void init_GateHelpers(py::module &);
 
 void init_GateVolumeVoxelizer(py::module &);
 
+void init_GateRF3Actor(py::module &m);
+
 PYBIND11_MODULE(opengate_core, m) {
 
   init_G4ThreeVector(m);
@@ -639,4 +641,6 @@ PYBIND11_MODULE(opengate_core, m) {
   init_GateUniqueVolumeIDManager(m);
   init_GateUniqueVolumeID(m);
   init_GateVolumeDepthID(m);
+
+  init_GateRF3Actor(m);
 }
