@@ -25,6 +25,7 @@ class RF3Actor(ActorBase, g4.GateRF3Actor):
                 "doc": "FIXME",
             },
         ),
+        
     }
 
     def __init__(self, *args, **kwargs) -> None:
