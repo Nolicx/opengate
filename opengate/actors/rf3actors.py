@@ -1,20 +1,27 @@
-from box import Box
-import numpy as np
-import itk
-import threading
 
+import numpy as np
+import threading
+import numpy as np
 import opengate_core as g4
-from ..utility import g4_units, LazyModuleLoader
+
 from ..exception import fatal
 from .base import ActorBase
-from .actoroutput import ActorOutputSingleImage, ActorOutputRoot
+
 from ..base import process_cls
+
+from RadFiled3D.RadFiled3D import CartesianRadiationField, vec3, DType
+
+from radiation_simulation.analysis.calculations import bresenham_batch_trajectories, generate_voxel_grid, scale_positions_to_voxel_grid
+from radiation_simulation.visualization.three_d import plot_3d_heatmap
+# crf = CartesianRadiationField(vec3(1,1,1), vec3(10,10,10))
+# channel = crf.add_channel("test")
+# channel.add_layer("test", "keV", DType.FLOAT32)
 
 class RF3Actor(ActorBase, g4.GateRF3Actor):
 
     user_info_defaults = {
         "batch_size": (
-            50.000,
+            2e5,
             {
                 "doc": "FIXME",
             },
@@ -25,28 +32,29 @@ class RF3Actor(ActorBase, g4.GateRF3Actor):
                 "doc": "FIXME",
             },
         ),
-        
     }
 
     def __init__(self, *args, **kwargs) -> None:
         ActorBase.__init__(self, *args, **kwargs)
         self.__initcpp__()
         
-        self.output = self.user_info.output if self.user_info.output else {"total_hits": 0, "total_energy": 0}
-
         self._total_hits = 0
         self._total_energy = 0
+        self.voxel_size = 5
+        self.world_limits = np.array([[-500, 500], [-500, 500], [-500, 500]])
+        self.voxel_grid = generate_voxel_grid(self.world_limits, self.voxel_size)
         self.lock = None
+        
 
     def __initcpp__(self)-> None:
         g4.GateRF3Actor.__init__(self, self.user_info)
         self.AddActions(
             {
+                "SteppingAction",
                 "BeginOfRunActionMasterThread",
                 "EndOfRunActionMasterThread",
                 "BeginOfRunAction",
                 "EndOfRunAction",
-                "SteppingAction",
             }
         )
         
@@ -80,25 +88,45 @@ class RF3Actor(ActorBase, g4.GateRF3Actor):
         pre_pos_x = np.array(actor.GetPrePositionX())
         pre_pos_y = np.array(actor.GetPrePositionY())
         pre_pos_z = np.array(actor.GetPrePositionZ())
-        num_hits = np.array(actor.GetCurrentNumberOfHits())
-        if self.output is not None:
-            self.output["total_hits"] += num_hits
-            self.output["total_energy"] += np.sum(energy)
+        post_pos_x = np.array(actor.GetPostPositionX())
+        post_pos_y = np.array(actor.GetPostPositionY())
+        post_pos_z = np.array(actor.GetPostPositionZ())
+        
+        pre_positions = np.array([pre_pos_x, pre_pos_y, pre_pos_z]).T  # Shape (50, 3)
+        post_positions = np.array([post_pos_x, post_pos_y, post_pos_z]).T  # Shape (50, 3)
+        positions = np.array([pre_positions, post_positions])  # Shape (2, 50, 3)        
+        
+        voxelized_positions = scale_positions_to_voxel_grid(
+            self.world_limits,
+            positions,
+            np.array(self.voxel_grid.shape),
+        )
+        
+        grid_positions, trajectory_ids = bresenham_batch_trajectories(voxelized_positions, progress=False)
+        energy_flat = energy[trajectory_ids]
+        np.add.at(self.voxel_grid, tuple(grid_positions), energy_flat)
+        
+        # num_hits = np.array(actor.GetCurrentNumberOfHits())
+
+        # self._total_hits += num_hits
+        # self._total_energy += np.sum(energy)
         
         # do nothing if no hits
         if energy.size == 0:
             return
 
     def EndOfRunActionMasterThread(self, run_index):
-        return 
+        return 0    # Wenn kein 0, dann kackt alles ab
 
     def EndSimulationAction(self):
-        if self.output:
-            print("Total hits: ", self.output["total_hits"])
-            print("Total energy: ", self.output["total_energy"])
+        with self.lock:
+            print(self.voxel_grid.max())
+            print(self.voxel_grid)
+            plot_3d_heatmap(self.voxel_grid, self.world_limits, (self.voxel_size, self.voxel_size, self.voxel_size))
         
         g4.GateRF3Actor.EndSimulationAction(self)
         ActorBase.EndSimulationAction(self)
         del self.lock   #Cannot be pickled
+        del self.voxel_grid
 
 process_cls(RF3Actor)
