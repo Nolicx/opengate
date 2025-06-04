@@ -5,40 +5,39 @@
    See LICENSE.md for further details
    -------------------------------------------------- */
 
-#include <pybind11/functional.h>
+#include "GateRF3Actor.h"
 #include <pybind11/pybind11.h>
+#include <pybind11/functional.h>
 #include <pybind11/stl.h>
 
 namespace py = pybind11;
 
-#include "GateRF3Actor.h"
-
 class PyGateRF3Actor : public GateRF3Actor {
 public:
-    // Inherit the constructors
     using GateRF3Actor::GateRF3Actor;
 
-    void BeginOfRunActionMasterThread(int run_id) override {
-        PYBIND11_OVERLOAD(void, GateRF3Actor, BeginOfRunActionMasterThread, run_id);
-    }
+//   void BeginOfRunActionMasterThread(int run_id) override {
+//     PYBIND11_OVERLOAD(void, GateRF3Actor, BeginOfRunActionMasterThread, run_id);
+//   }
 
-    int EndOfRunActionMasterThread(int run_id) override {
-        PYBIND11_OVERLOAD(int, GateRF3Actor, EndOfRunActionMasterThread, run_id);
-    }
+//   int EndOfRunActionMasterThread(int run_id) override {
+//     PYBIND11_OVERLOAD(int, GateRF3Actor, EndOfRunActionMasterThread, run_id);
+//   }
+
 };
 
 void init_GateRF3Actor(py::module &m) {
     py::class_<GateRF3Actor, PyGateRF3Actor,
-               std::unique_ptr<GateRF3Actor, py::nodelete>, GateVActor>(
+                std::unique_ptr<GateRF3Actor, py::nodelete>, GateVActor>(
         m, "GateRF3Actor")
-        .def(py::init<py::dict &>())
-        .def("BeginOfRunActionMasterThread",
-             &GateRF3Actor::BeginOfRunActionMasterThread)
-        .def("EndOfRunActionMasterThread",
-             &GateRF3Actor::EndOfRunActionMasterThread)
+    // py::class_<GateRF3Actor, GateVActor>(m, "GateRF3Actor")
+        .def(py::init<py::dict &>(), py::keep_alive<1, 2>())
+        .def("InitializeUserInfo", &GateRF3Actor::InitializeUserInfo)
+        .def("BeginOfRunAction", &GateRF3Actor::BeginOfRunAction)
+        .def("EndOfRunAction", &GateRF3Actor::EndOfRunAction)
         .def("SetCallbackFunction", &GateRF3Actor::SetCallbackFunction)
-        .def("GetCurrentNumberOfHits", &GateRF3Actor::GetCurrentNumberOfHits)
-        .def("GetCurrentRunId", &GateRF3Actor::GetCurrentRunId)
+        // .def("GetCurrentNumberOfHits", &GateRF3Actor::GetCurrentNumberOfHits)
+        // .def("GetCurrentRunId", &GateRF3Actor::GetCurrentRunId)
         .def("GetEnergy", &GateRF3Actor::GetEnergy)
         .def("GetPrePositionX", &GateRF3Actor::GetPrePositionX)
         .def("GetPrePositionY", &GateRF3Actor::GetPrePositionY)
