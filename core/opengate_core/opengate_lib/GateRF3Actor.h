@@ -80,6 +80,7 @@ protected:
         int fCurrentRunId;
     };
     G4Cache<threadLocalT> fThreadLocalData;
+    int photonCount;
 
     static std::mutex sBarrierMutex;
     static std::condition_variable sBarrierCond;

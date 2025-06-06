@@ -116,7 +116,10 @@ void GateRF3Actor::EndOfRunAction(const G4Run * /*run*/) {
   }
 }
 
-// void GateRF3Actor::BeginOfEventAction(const G4Event * /*event*/) {}
+// void GateRF3Actor::BeginOfEventAction(const G4Event * /*event*/) {
+//   G4RecursiveAutoLock mutex(&LocalThreadDataMutex);
+//   photonCount += 1; // Increment photon count for each event
+// }
 
 // void GateRF3Actor::PreUserTrackingAction(const G4Track *track) {}
 
@@ -141,7 +144,7 @@ void GateRF3Actor::SteppingAction(G4Step *step) {
   l.fEnergy.push_back(energy);
   G4cout << "Current number of hits: " << l.fCurrentNumberOfHits << ", thread ID: " << G4Threading::G4GetThreadId() << G4endl;
 
-  if (l.fCurrentNumberOfHits >= 50) { //Maybe use BatchSize
+  if (l.fCurrentNumberOfHits >= 10000) { //Maybe use BatchSize
     G4cout << "Acquired lock in C++ SteppingAction, Running CallbackFunction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
     fCallbackFunction(this);
     G4cout << "CallbackFunction executed, clearing data, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
@@ -159,7 +162,9 @@ void GateRF3Actor::SteppingAction(G4Step *step) {
     l.fEnergy.clear();
     G4cout << "Released lock in C++ SteppingAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
   }
-  fSourceManager->SetRunTerminationFlag(true);
+  // fSourceManager->SetRunTerminationFlag(true);
+      // G4RunManager::GetRunManager()->AbortEvent();
+			// G4RunManager::GetRunManager()->AbortRun(false);
 }
 
 // void GateRF3Actor::EndOfEventAction(const G4Event *event) {}
