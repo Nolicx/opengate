@@ -25,22 +25,22 @@ public:
 
     explicit GateRF3Actor(py::dict &user_info);
 
-    // ~GateRF3Actor() override;
+    ~GateRF3Actor() override;
     
     void InitializeUserInfo(py::dict &user_info) override;
 
     void InitializeCpp() override;
     // void StartSimulationAction() override;
 
-    void BeginOfRunAction(const G4Run * /*run*/) override;  // Called at simulation start
-    void EndOfRunAction(const G4Run * /*run*/) override;    // Called at simulation end
+    void BeginOfEventAction(const G4Event *event) override;  
+    void BeginOfRunAction(const G4Run * /*run*/) override;  
 
     // void PreUserTrackingAction(const G4Track *track) override;
 
     void SteppingAction(G4Step *) override;     //Called when step in attached volume
     
-    // void EndOfEventAction(const G4Event *event) override;
-    // void EndOfRunAction(const G4Run *run) override;
+    void EndOfEventAction(const G4Event *event) override;
+    void EndOfRunAction(const G4Run *run) override;
     // void EndOfSimulationWorkerAction(const G4Run *run) override;
     // void EndSimulationAction() override;
     
@@ -49,19 +49,26 @@ public:
     // int GetCurrentNumberOfHits() const;
     // int GetCurrentRunId() const;
 
-    const std::vector<double> GetEnergy() const;
-    const std::vector<double> GetPrePositionX() const;
-    const std::vector<double> GetPrePositionY() const;
-    const std::vector<double> GetPrePositionZ() const;
-    const std::vector<double> GetPostPositionX() const;
-    const std::vector<double> GetPostPositionY() const;
-    const std::vector<double> GetPostPositionZ() const;
+    std::vector<double> GetEnergy() const;
+    std::vector<double> GetPrePositionX() const;
+    std::vector<double> GetPrePositionY() const;
+    std::vector<double> GetPrePositionZ() const;
+    std::vector<std::array<double, 3>> GetPrePosition() const;
+    std::vector<double> GetPostPositionX() const;
+    std::vector<double> GetPostPositionY() const;
+    std::vector<double> GetPostPositionZ() const;
+    std::vector<std::array<double, 3>> GetPostPosition() const;
+    void ClearfThreadLocalData(auto &l); 
     // std::vector<double> GetDirectionX() const;
     // std::vector<double> GetDirectionY() const;
     // std::vector<double> GetDirectionZ() const;
-
     void BeginOfRunActionMasterThread(int run_id) override;  // Called at simulation start (master thread only)
     int EndOfRunActionMasterThread(int run_id) override;  // Called at simulation end (master thread only)
+
+    int GetNumberOfAbsorbedEvents() const { return fNumberOfAbsorbedEvents; }
+    // int GetTotalNumberOfEntries() const { return fTotalNumberOfEntries; }
+    bool runTerminationFlag;
+    void StopSimulation();
 
 protected:
     CallbackFunctionType fCallbackFunction;
@@ -80,13 +87,16 @@ protected:
         int fCurrentRunId;
     };
     G4Cache<threadLocalT> fThreadLocalData;
-    int photonCount;
 
-    static std::mutex sBarrierMutex;
-    static std::condition_variable sBarrierCond;
-    static int sBarrierCount;
-    static int sNumThreads;
-    static int instanceCount;
+    std::mutex sBarrierMutex;
+    std::condition_variable sBarrierCond;
+
+    int fBatchSize;
+    int fNumberOfAbsorbedEvents;
+
+    int sBarrierCount;
+    int sNumThreads;
+    int instanceCount;
 };
 
 #endif // RadFiled3DActor_h

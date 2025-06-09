@@ -9,6 +9,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
 #include <pybind11/stl.h>
+#include <pybind11/numpy.h>
 
 namespace py = pybind11;
 
@@ -23,8 +24,9 @@ public:
 //   int EndOfRunActionMasterThread(int run_id) override {
 //     PYBIND11_OVERLOAD(int, GateRF3Actor, EndOfRunActionMasterThread, run_id);
 //   }
-
 };
+
+
 
 void init_GateRF3Actor(py::module &m) {
     py::class_<GateRF3Actor, PyGateRF3Actor,
@@ -38,13 +40,17 @@ void init_GateRF3Actor(py::module &m) {
         .def("SetCallbackFunction", &GateRF3Actor::SetCallbackFunction)
         // .def("GetCurrentNumberOfHits", &GateRF3Actor::GetCurrentNumberOfHits)
         // .def("GetCurrentRunId", &GateRF3Actor::GetCurrentRunId)
-        .def("GetEnergy", &GateRF3Actor::GetEnergy)
-        .def("GetPrePositionX", &GateRF3Actor::GetPrePositionX)
-        .def("GetPrePositionY", &GateRF3Actor::GetPrePositionY)
-        .def("GetPrePositionZ", &GateRF3Actor::GetPrePositionZ)
-        .def("GetPostPositionX", &GateRF3Actor::GetPostPositionX)
-        .def("GetPostPositionY", &GateRF3Actor::GetPostPositionY)
-        .def("GetPostPositionZ", &GateRF3Actor::GetPostPositionZ);
+        .def("GetEnergy", [](GateRF3Actor &self) { return py::array(py::cast(self.GetEnergy())); })
+        .def("GetPrePositionX", [](GateRF3Actor &self) { return py::array(py::cast(self.GetPrePositionX())); })
+        .def("GetPrePositionY", [](GateRF3Actor &self) { return py::array(py::cast(self.GetPrePositionY())); })
+        .def("GetPrePositionZ", [](GateRF3Actor &self) { return py::array(py::cast(self.GetPrePositionZ())); })
+        .def("GetPrePosition", [](GateRF3Actor &self) { return py::array(py::cast(self.GetPrePosition())); })
+        .def("GetPostPositionX", [](GateRF3Actor &self) { return py::array(py::cast(self.GetPostPositionX())); })
+        .def("GetPostPositionY", [](GateRF3Actor &self) { return py::array(py::cast(self.GetPostPositionY())); })
+        .def("GetPostPositionZ", [](GateRF3Actor &self) { return py::array(py::cast(self.GetPostPositionZ())); })
+        .def("GetPostPosition", [](GateRF3Actor &self) { return py::array(py::cast(self.GetPostPosition())); })
+        .def("StopSimulation", &GateRF3Actor::StopSimulation)
+        .def("GetNumberOfAbsorbedEvents", &GateRF3Actor::GetNumberOfAbsorbedEvents);
         // .def("GetDirectionX", &GateRF3Actor::GetDirectionX)
         // .def("GetDirectionY", &GateRF3Actor::GetDirectionY)
         // .def("GetDirectionZ", &GateRF3Actor::GetDirectionZ)

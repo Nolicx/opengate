@@ -18,32 +18,36 @@ from radiation_simulation.visualization.three_d import plot_3d_heatmap
 from radiation_simulation.visualization.two_d import plot_voxel_histograms_2d
 
 MAX_ENERGY = 125
-NUM_BINS = 25   # 5 keV steps
+NUM_BINS = 5   # 5 keV steps
 BIN_WIDTH = MAX_ENERGY / NUM_BINS
 
 CRF = CartesianRadiationField(vec3(1,1,1), vec3(0.005,0.005,0.005))
 CHANNEL = CRF.add_channel("test")
 CHANNEL.add_layer("energies", "keV", DType.FLOAT64)
 CHANNEL.add_layer("hits", "counts", DType.UINT64)
-# CHANNEL.add_layer("mean", "keV", DType.FLOAT64)
-# CHANNEL.add_layer("std", "keV", DType.FLOAT64)
 CHANNEL.add_histogram_layer("histograms", NUM_BINS, BIN_WIDTH, "keV")
 
 class RF3Actor(DigitizerBase, g4.GateRF3Actor):
 
     user_info_defaults = {
         "batch_size": (
-            2e5,
+            100.000,
             {
                 "doc": "FIXME",
             },
         ),
-        # "output": (
-        #     None,
-        #     {
-        #         "doc": "FIXME",
-        #     },
-        # ),
+        "threshold": (
+            0.100,
+            {
+                "doc": "FIXME",
+            },
+        ),
+        "percentile": (
+            0.950,
+            {
+                "doc": "FIXME",
+            },
+        ),
     }
 
     def __init__(self, *args, **kwargs) -> None:
@@ -54,13 +58,11 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
         self.world_limits = np.array([[-500, 500], [-500, 500], [-500, 500]])
         self.energy_grid = CHANNEL.get_layer_as_ndarray("energies")
         self.hits_grid = CHANNEL.get_layer_as_ndarray("hits")
-        # self.mean_grid = CHANNEL.get_layer_as_ndarray("mean")
-        # self.std_grid = CHANNEL.get_layer_as_ndarray("std")
         self.histogram_grid = CHANNEL.get_layer_as_ndarray("histograms")
         self.histogram_means = np.zeros_like(self.histogram_grid, dtype=np.float64)
         self.histogram_counts = np.zeros_like(self.energy_grid, dtype=np.int64)
-        self.histogram_m2 = np.zeros_like(self.histogram_grid, dtype=np.float64) #Maximaum possible error
-        self.eps_rel = np.ones_like(self.energy_grid, dtype=np.float64)
+        self.histogram_m2 = np.zeros_like(self.histogram_grid, dtype=np.float64) 
+        self.eps_rel = np.ones_like(self.energy_grid, dtype=np.float64)    # Maximum possible error     
         self.variance_means = np.zeros_like(self.histogram_grid, dtype=np.float64)
         
         self.lock = None
@@ -108,24 +110,17 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
 
     def process_data(self, actor):
         # get values from cpp side
-        energies = np.array(actor.GetEnergy())   #MeV
+        energies = actor.GetEnergy()   #MeV
         if energies.size == 0:
             return  # do nothing if no hits
     
         # Backup old values
-        old_hits_grid = self.hits_grid.copy()  # Für new_hits_mask
-        # old_histogram_grid = self.histogram_grid.copy()
-        # old_histogram_means = self.histogram_means.copy()
+        old_hits_grid = self.hits_grid.copy()  # For creating new_hits_mask
         
         # Get values from sim
-        pre_positions = np.zeros((energies.size, 3), dtype=np.float64)    #TODO: als numpy array zurückgeben?
-        post_positions = np.zeros((energies.size, 3), dtype=np.float64)
-        pre_positions[:, 0] = np.array(actor.GetPrePositionX())
-        pre_positions[:, 1] = np.array(actor.GetPrePositionY())
-        pre_positions[:, 2] = np.array(actor.GetPrePositionZ())
-        post_positions[:, 0] = np.array(actor.GetPostPositionX())
-        post_positions[:, 1] = np.array(actor.GetPostPositionY())
-        post_positions[:, 2] = np.array(actor.GetPostPositionZ())
+        pre_positions = actor.GetPrePosition()  # Returns a numpy array of shape (num_hits, 3)
+        
+        post_positions = actor.GetPostPosition()
         positions = np.array([pre_positions, post_positions])   # Shape: (2, num_hits, 3)   
         voxelized_positions = scale_positions_to_voxel_grid(
             self.world_limits,
@@ -196,7 +191,15 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
         print(sorted_eps_rel[::20000])
         # print(sorted_eps_rel)
         print("Eps_rel min and max: ", sorted_eps_rel[0], sorted_eps_rel[-1])
-        print("Eps_rel 75% Quantil", sorted_eps_rel[int(sorted_eps_rel.size * 0.75)])  # 0.95: 95% Quantil
+        percentile = self.user_info["percentile"]
+        percentile_idx = int(sorted_eps_rel.size * percentile)
+        print(f"Eps_rel {percentile * 100}% Quantil {sorted_eps_rel[percentile_idx]}")  # 0.95: 95% Quantil
+        
+        threshhold = self.user_info["threshold"]
+        print(f"Threshold cleared: {sorted_eps_rel[percentile_idx] <= threshhold}")
+        if sorted_eps_rel[percentile_idx] <= threshhold:
+            g4.GateRF3Actor.StopSimulation(self)
+        g4.GateRF3Actor.StopSimulation(self)
 
         self._total_energy += np.sum(energies)
         print(f"Total energy so far: {self._total_energy}, thread ID: {threading.get_ident()}")
@@ -218,6 +221,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
             # plot_voxel_histograms_2d(self.histogram_grid)
             # plot_3d_heatmap(self.eps_rel, self.world_limits, (self.voxel_size, self.voxel_size, self.voxel_size))
             print(f"Total energy: {self._total_energy}")
+            print(g4.GateRF3Actor.GetNumberOfAbsorbedEvents(self))
             g4.GateRF3Actor.EndSimulationAction(self)
             DigitizerBase.EndSimulationAction(self)
         
