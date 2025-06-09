@@ -58,9 +58,9 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
         # self.std_grid = CHANNEL.get_layer_as_ndarray("std")
         self.histogram_grid = CHANNEL.get_layer_as_ndarray("histograms")
         self.histogram_means = np.zeros_like(self.histogram_grid, dtype=np.float64)
-        self.histogram_m2 = np.zeros_like(self.histogram_grid, dtype=np.float64)
-        self.eps_rel = np.zeros_like(self.energy_grid, dtype=np.float64)
-        self.histogram_counts = np.zeros_like(self.histogram_grid, dtype=np.int64)
+        self.histogram_counts = np.zeros_like(self.energy_grid, dtype=np.int64)
+        self.histogram_m2 = np.zeros_like(self.histogram_grid, dtype=np.float64) #Maximaum possible error
+        self.eps_rel = np.ones_like(self.energy_grid, dtype=np.float64)
         self.variance_means = np.zeros_like(self.histogram_grid, dtype=np.float64)
         
         self.lock = None
@@ -108,7 +108,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
 
     def process_data(self, actor):
         # get values from cpp side
-        energies = np.array(actor.GetEnergy()) * 1000   #keV
+        energies = np.array(actor.GetEnergy())   #MeV
         if energies.size == 0:
             return  # do nothing if no hits
     
@@ -117,6 +117,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
         # old_histogram_grid = self.histogram_grid.copy()
         # old_histogram_means = self.histogram_means.copy()
         
+        # Get values from sim
         pre_positions = np.zeros((energies.size, 3), dtype=np.float64)    #TODO: als numpy array zurückgeben?
         post_positions = np.zeros((energies.size, 3), dtype=np.float64)
         pre_positions[:, 0] = np.array(actor.GetPrePositionX())
@@ -133,6 +134,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
         )
         grid_indices, trajectory_ids = bresenham_batch_trajectories(voxelized_positions, progress=False)
         energies_flat = energies[trajectory_ids]
+        # Update energies and hits
         np.add.at(self.energy_grid, tuple(grid_indices), energies_flat)
         np.add.at(self.hits_grid, tuple(grid_indices), 1)
           
@@ -153,7 +155,6 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
         #         self.histogram_grid[new_hits_mask_4d] / 
         #         self.hits_grid[new_hits_mask_4d][..., np.newaxis][new_hits_mask_4d]
         #     )
-        
         # max_hits_idx = np.unravel_index(np.argmax(self.hits_grid), self.hits_grid.shape)
         # max_hits = self.hits_grid[max_hits_idx]
         # print(f"Voxel mit den meisten Treffern: Index {max_hits_idx}, Treffer: {max_hits}")
@@ -163,7 +164,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
         # print(self.histogram_means[max_hits_idx] * self.hits_grid[max_hits_idx])
                 
         # Identify bins that were updated
-        self.histogram_counts[new_hits_mask_3d, :] += 1 #TODO: Könnte auch 3D sein, um Speicher zu sparen
+        self.histogram_counts[new_hits_mask_3d] += 1 #TODO: Könnte auch 3D sein, um Speicher zu sparen
         # print(self.histogram_counts.sum(),   # = 25 * histogram_means.sum()
         #       self.hits_grid.sum(),         # Mehrere Hits
         #       self.histogram_grid.sum(),    # Mehrere Hits
@@ -173,19 +174,29 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
 
         # 3. CALCULATE DELTA
         delta = self.histogram_means[new_hits_mask_3d, :] - self.variance_means[new_hits_mask_3d, :]
-        self.variance_means[new_hits_mask_3d, :] += delta / self.histogram_counts[new_hits_mask_3d, :]
+        self.variance_means[new_hits_mask_3d, :] += delta / self.histogram_counts[new_hits_mask_3d, np.newaxis]
         delta2 = self.histogram_means[new_hits_mask_3d, :] - self.variance_means[new_hits_mask_3d, :]
         self.histogram_m2[new_hits_mask_3d, :] += delta * delta2
         # print(delta, delta2)
-        print(f"Max histogram means: {self.histogram_means.max()}")
+        print(delta.shape, delta2.shape, self.histogram_means.shape)
+        # print(f"Max histogram means: {self.histogram_means.max()}")
         print(f"Max histogram m2: {self.histogram_m2.max()}")
 
         # 4. CALCULATE RELATIVE ERROR
-        self.eps_rel[new_hits_mask_3d] = np.sum(self.histogram_m2[new_hits_mask_3d, :] / self.histogram_counts[new_hits_mask_3d, :])
-        eps_rel = (self.eps_rel / NUM_BINS) * 4
-        sorted_eps_rel = np.sort(eps_rel, axis=None)
-        print(sorted_eps_rel[0], sorted_eps_rel[-1])
-        print(sorted_eps_rel[int(sorted_eps_rel.size * 0.95)])  # 95% Quantil
+        update_eps_rel_mask = self.histogram_counts > 2  # Only, where histograms were updated 2 or more times
+        valid_eps_rel_mask = new_hits_mask_3d & update_eps_rel_mask
+        print(new_hits_mask_3d.sum(), valid_eps_rel_mask.sum())
+        
+        self.eps_rel[valid_eps_rel_mask] = np.sum((self.histogram_m2[valid_eps_rel_mask, :] / self.histogram_counts[valid_eps_rel_mask, np.newaxis]), axis=1)
+        self.eps_rel[valid_eps_rel_mask] = (self.eps_rel[valid_eps_rel_mask] / NUM_BINS) * 4
+        print(self.eps_rel.min(), self.eps_rel.max(), self.eps_rel.mean())
+        # print(self.eps_rel)
+        # print("debug", np.sum(self.histogram_m2[valid_eps_rel_mask, :] / self.histogram_counts[valid_eps_rel_mask, np.newaxis], axis=1))
+        sorted_eps_rel = np.sort(self.eps_rel, axis=None)
+        print(sorted_eps_rel[::20000])
+        # print(sorted_eps_rel)
+        print("Eps_rel min and max: ", sorted_eps_rel[0], sorted_eps_rel[-1])
+        print("Eps_rel 75% Quantil", sorted_eps_rel[int(sorted_eps_rel.size * 0.75)])  # 0.95: 95% Quantil
 
         self._total_energy += np.sum(energies)
         print(f"Total energy so far: {self._total_energy}, thread ID: {threading.get_ident()}")

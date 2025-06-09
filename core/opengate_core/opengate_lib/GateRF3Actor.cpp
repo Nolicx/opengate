@@ -142,12 +142,12 @@ void GateRF3Actor::SteppingAction(G4Step *step) {
   l.fPostPositionY.push_back(postPos[1]);
   l.fPostPositionZ.push_back(postPos[2]);
   l.fEnergy.push_back(energy);
-  G4cout << "Current number of hits: " << l.fCurrentNumberOfHits << ", thread ID: " << G4Threading::G4GetThreadId() << G4endl;
+  // G4cout << "Current number of hits: " << l.fCurrentNumberOfHits << ", thread ID: " << G4Threading::G4GetThreadId() << G4endl;
 
   if (l.fCurrentNumberOfHits >= 10000) { //Maybe use BatchSize
-    G4cout << "Acquired lock in C++ SteppingAction, Running CallbackFunction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
+    // G4cout << "Acquired lock in C++ SteppingAction, Running CallbackFunction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
     fCallbackFunction(this);
-    G4cout << "CallbackFunction executed, clearing data, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
+    // G4cout << "CallbackFunction executed, clearing data, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
     l.fCurrentNumberOfHits = 0;
     // l.fCurrentRunId = 0;
     l.fPrePositionX.clear();
@@ -160,7 +160,7 @@ void GateRF3Actor::SteppingAction(G4Step *step) {
     // l.fDirectionY.clear();
     // l.fDirectionZ.clear();
     l.fEnergy.clear();
-    G4cout << "Released lock in C++ SteppingAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
+    // G4cout << "Released lock in C++ SteppingAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
   }
   // fSourceManager->SetRunTerminationFlag(true);
       // G4RunManager::GetRunManager()->AbortEvent();
