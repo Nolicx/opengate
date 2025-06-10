@@ -58,7 +58,6 @@ public:
     std::vector<double> GetPostPositionY() const;
     std::vector<double> GetPostPositionZ() const;
     std::vector<std::array<double, 3>> GetPostPosition() const;
-    void ClearfThreadLocalData(auto &l); 
     // std::vector<double> GetDirectionX() const;
     // std::vector<double> GetDirectionY() const;
     // std::vector<double> GetDirectionZ() const;
@@ -66,12 +65,10 @@ public:
     int EndOfRunActionMasterThread(int run_id) override;  // Called at simulation end (master thread only)
 
     int GetNumberOfAbsorbedEvents() const { return fNumberOfAbsorbedEvents; }
-    // int GetTotalNumberOfEntries() const { return fTotalNumberOfEntries; }
+    int GetNumberOfHits() const { return fNumberOfHits; }
     bool runTerminationFlag;
     void StopSimulation();
 
-protected:
-    CallbackFunctionType fCallbackFunction;
     struct threadLocalT {
         std::vector<double> fEnergy;    //Always Pre
         std::vector<double> fPrePositionX;
@@ -86,17 +83,19 @@ protected:
         int fCurrentNumberOfHits;
         int fCurrentRunId;
     };
-    G4Cache<threadLocalT> fThreadLocalData;
+    void ClearfThreadLocalData(threadLocalT &l); 
 
-    std::mutex sBarrierMutex;
-    std::condition_variable sBarrierCond;
+protected:
+    CallbackFunctionType fCallbackFunction;
+
+    G4Cache<threadLocalT> fThreadLocalData;
 
     int fBatchSize;
     int fNumberOfAbsorbedEvents;
+    int fNumberOfHits;
 
     int sBarrierCount;
     int sNumThreads;
-    int instanceCount;
 };
 
 #endif // RadFiled3DActor_h

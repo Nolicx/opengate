@@ -13,26 +13,11 @@
 
 namespace py = pybind11;
 
-class PyGateRF3Actor : public GateRF3Actor {
-public:
-    using GateRF3Actor::GateRF3Actor;
-
-//   void BeginOfRunActionMasterThread(int run_id) override {
-//     PYBIND11_OVERLOAD(void, GateRF3Actor, BeginOfRunActionMasterThread, run_id);
-//   }
-
-//   int EndOfRunActionMasterThread(int run_id) override {
-//     PYBIND11_OVERLOAD(int, GateRF3Actor, EndOfRunActionMasterThread, run_id);
-//   }
-};
-
-
-
 void init_GateRF3Actor(py::module &m) {
-    py::class_<GateRF3Actor, PyGateRF3Actor,
-                std::unique_ptr<GateRF3Actor, py::nodelete>, GateVActor>(
-        m, "GateRF3Actor")
-    // py::class_<GateRF3Actor, GateVActor>(m, "GateRF3Actor")
+    // py::class_<GateRF3Actor, PyGateRF3Actor,
+    //             std::unique_ptr<GateRF3Actor, py::nodelete>, GateVActor>(
+    //     m, "GateRF3Actor")
+    py::class_<GateRF3Actor, GateVActor>(m, "GateRF3Actor")
         .def(py::init<py::dict &>(), py::keep_alive<1, 2>())
         .def("InitializeUserInfo", &GateRF3Actor::InitializeUserInfo)
         .def("BeginOfRunAction", &GateRF3Actor::BeginOfRunAction)
@@ -50,8 +35,23 @@ void init_GateRF3Actor(py::module &m) {
         .def("GetPostPositionZ", [](GateRF3Actor &self) { return py::array(py::cast(self.GetPostPositionZ())); })
         .def("GetPostPosition", [](GateRF3Actor &self) { return py::array(py::cast(self.GetPostPosition())); })
         .def("StopSimulation", &GateRF3Actor::StopSimulation)
-        .def("GetNumberOfAbsorbedEvents", &GateRF3Actor::GetNumberOfAbsorbedEvents);
+        .def("GetNumberOfAbsorbedEvents", &GateRF3Actor::GetNumberOfAbsorbedEvents)
+        .def("GetNumberOfHits", &GateRF3Actor::GetNumberOfHits);
         // .def("GetDirectionX", &GateRF3Actor::GetDirectionX)
         // .def("GetDirectionY", &GateRF3Actor::GetDirectionY)
         // .def("GetDirectionZ", &GateRF3Actor::GetDirectionZ)
 }
+
+
+// class PyGateRF3Actor : public GateRF3Actor {
+// public:
+//     using GateRF3Actor::GateRF3Actor;
+
+// //   void BeginOfRunActionMasterThread(int run_id) override {
+// //     PYBIND11_OVERLOAD(void, GateRF3Actor, BeginOfRunActionMasterThread, run_id);
+// //   }
+
+// //   int EndOfRunActionMasterThread(int run_id) override {
+// //     PYBIND11_OVERLOAD(int, GateRF3Actor, EndOfRunActionMasterThread, run_id);
+// //   }
+// };
