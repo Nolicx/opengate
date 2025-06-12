@@ -86,13 +86,13 @@ void GateRF3Actor::EndOfRunAction(const G4Run * /*run*/) {
   
   auto &l = fThreadLocalData.Get();  // When the run ends, we send the current remaining hits to the ARF
   if (l.fCurrentNumberOfHits > 0) {
-    {
-      G4AutoLock mutex(&LocalThreadDataMutex);
+    // {
+    //   G4AutoLock mutex(&LocalThreadDataMutex);
       // G4cout << "Acquired EndOfRunAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
       fNumberOfHits += l.fCurrentNumberOfHits;
       fCallbackFunction(this);
       // G4cout << "Released EndOfRunAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
-    }
+    // }
     ClearfThreadLocalData(l);
   }
 }
@@ -152,13 +152,13 @@ void GateRF3Actor::SteppingAction(G4Step *step) {
   l.fEnergy.push_back(energy);
 
   if (l.fCurrentNumberOfHits >= fBatchSize) { //Maybe use BatchSize
-    {
-      G4AutoLock mutex(&LocalThreadDataMutex);
+    // {
+    //   G4AutoLock mutex(&LocalThreadDataMutex);
     //   G4cout << "Acquired SteppingAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
       fNumberOfHits += l.fCurrentNumberOfHits; 
       fCallbackFunction(this);
     //   G4cout << "Released SteppingAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
-    }
+    // }
     ClearfThreadLocalData(l);
   }
 }
