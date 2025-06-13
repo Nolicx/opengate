@@ -3,8 +3,6 @@ import numpy as np
 import threading
 import numpy as np
 import opengate_core as g4
-import time
-import os
 
 from .digitizers import DigitizerBase
 
@@ -15,6 +13,7 @@ from RadFiled3D.RadFiled3D import CartesianRadiationField, vec3, DType
 from radiation_simulation.analysis.calculations import bresenham_batch_trajectories, scale_positions_to_voxel_grid, update_grids_numba, evaluate_relative_errors
 from radiation_simulation.visualization.three_d import plot_3d_heatmap
 from radiation_simulation.visualization.two_d import plot_voxel_histograms_2d, plot_evaluation_results
+from radiation_simulation.analysis.utils import load_rf3_file, store_rf3_file
 
 
 class RF3Actor(DigitizerBase, g4.GateRF3Actor):
@@ -257,6 +256,8 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
                 plot_voxel_histograms_2d(self.histogram_grid, "tests/test_data/rf3actor_test_histograms", idx)
             
             plot_evaluation_results(self.eval_num_photons, self.eval_eps_rel_cleared_percentage, output_path="tests/test_data/rf3actor_test_histograms/rf3actor_test_evaluation.png")
+        
+            store_rf3_file(self.crf, "tests/test_data/rf3actor_test_histograms/rf3actor_test")
         
         #TODO: hits grid mit histogram_grid berechnen
         del self.calc_lock   #Cannot be pickled
