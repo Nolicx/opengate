@@ -28,7 +28,7 @@ GateRF3Actor::GateRF3Actor(py::dict &user_info): GateVActor(user_info, true) {
   fActions.insert("BeginOfRunActionMasterThread");
   fActions.insert("EndOfRunActionMasterThread");
 
-  fBatchSize = 0;
+  fHitsBatchSize = 0;
   fNumberOfHits = 0;
   fNumberOfAbsorbedEvents = 0;
   runTerminationFlag = false;
@@ -43,7 +43,7 @@ GateRF3Actor::~GateRF3Actor() {
 
 void GateRF3Actor::InitializeUserInfo(py::dict &user_info) {
   GateVActor::InitializeUserInfo(user_info);
-  fBatchSize = DictGetInt(user_info, "batch_size");
+  fHitsBatchSize = DictGetInt(user_info, "hits_batch_size");
 }
 
 void GateRF3Actor::InitializeCpp() {
@@ -151,7 +151,7 @@ void GateRF3Actor::SteppingAction(G4Step *step) {
   l.fPostPositionZ.push_back(postPos[2]);
   l.fEnergy.push_back(energy);
 
-  if (l.fCurrentNumberOfHits >= fBatchSize) { //Maybe use BatchSize
+  if (l.fCurrentNumberOfHits >= fHitsBatchSize) { //Maybe use BatchSize
     // {
     //   G4AutoLock mutex(&LocalThreadDataMutex);
     //   G4cout << "Acquired SteppingAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;

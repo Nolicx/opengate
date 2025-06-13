@@ -90,7 +90,7 @@ protected:
 
     G4Cache<threadLocalT> fThreadLocalData;
 
-    int fBatchSize;
+    int fHitsBatchSize;
     int fNumberOfAbsorbedEvents;
     int fNumberOfHits;
 
