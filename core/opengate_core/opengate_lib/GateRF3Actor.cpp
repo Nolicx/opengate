@@ -19,7 +19,8 @@ GateRF3Actor::GateRF3Actor(py::dict &user_info): GateVActor(user_info, true) {
   // fActions.insert("StartSimulationAction");
   fActions.insert("BeginOfRunAction");
   fActions.insert("BeginOfEventAction");
-  // fActions.insert("PreUserTrackingAction");
+  fActions.insert("PreUserTrackingAction");
+  fActions.insert("PostUserTrackingAction");
   fActions.insert("SteppingAction");
   fActions.insert("EndOfRunAction");
   fActions.insert("EndOfEventAction");
@@ -141,6 +142,12 @@ void GateRF3Actor::SteppingAction(G4Step *step) {
   auto prePos = pre->GetPosition();
   auto postPos = post->GetPosition();
   auto energy = pre->GetKineticEnergy();
+
+
+  // auto *track = step->GetTrack();
+  // auto *particle = track->GetDefinition();
+
+  // G4cout  << particle->GetParticleName() << G4endl;
 
   l.fCurrentNumberOfHits++;
   l.fPrePositionX.push_back(prePos[0]);

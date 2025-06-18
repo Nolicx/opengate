@@ -67,6 +67,12 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
                 "doc": "FIXME",
             },
         ),
+        "trace_mode": (
+            "round_safe",
+            {
+                "doc": "FIXME",
+            },
+        ),
     }
     
     #TODO: Die defaults sind fucky, es wird nichts zugewiesen
@@ -161,6 +167,11 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
         self.InitializeUserInfo(self.user_info)
         self.InitializeCpp()
         self.SetCallbackFunction(self.process_data)
+        
+        # print(self)
+        # print(self.user_info)
+        # print(self.filters)
+        # exit()
 
     # def __getstate__(self)-> dict:
     #     # needed to not pickle objects that cannot be pickled (g4, cuda, lock, etc).
@@ -182,7 +193,17 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
             positions,
             np.array(self.energy_grid.shape),
         )
-        grid_indices, trajectory_ids = bresenham_batch_trajectories(voxelized_positions, progress=False)  
+        # print(positions)
+        # print(voxelized_positions)
+        # exit()
+        
+        # print(voxelized_positions[0])
+        # print(voxelized_positions[1])
+        # exit()
+        
+        grid_indices, trajectory_ids = bresenham_batch_trajectories(
+            voxelized_positions, mode = self.user_info["trace_mode"],progress=False
+            )  
         grid_indices = np.array(grid_indices, dtype=np.uint16)  # Shape: (3, num_hits)
         trajectory_ids = np.array(trajectory_ids, dtype=np.uint32)  # Shape: (num_hits,)
         energies_flat = np.array(energies[trajectory_ids], dtype=np.float32)  # Shape: (num_hits,)
@@ -248,14 +269,14 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):
             
             # plot_3d_heatmap(self.energy_grid, self.world_limits, (self.voxel_size, self.voxel_size, self.voxel_size))
         
-            indices_per_axis = np.linspace(25, 175, 3, dtype=int)
-            x_indices, y_indices, z_indices = np.meshgrid(indices_per_axis, indices_per_axis, indices_per_axis, indexing='ij')
+            # indices_per_axis = np.linspace(25, 175, 3, dtype=int)
+            # x_indices, y_indices, z_indices = np.meshgrid(indices_per_axis, indices_per_axis, indices_per_axis, indexing='ij')
 
-            indices_array = np.column_stack([x_indices.ravel(), y_indices.ravel(), z_indices.ravel()])
-            for idx in indices_array:
-                plot_voxel_histograms_2d(self.histogram_grid, "tests/test_data/rf3actor_test_histograms", idx)
+            # indices_array = np.column_stack([x_indices.ravel(), y_indices.ravel(), z_indices.ravel()])
+            # for idx in indices_array:
+            #     plot_voxel_histograms_2d(self.histogram_grid, "tests/test_data/rf3actor_test_histograms", idx)
             
-            plot_evaluation_results(self.eval_num_photons, self.eval_eps_rel_cleared_percentage, output_path="tests/test_data/rf3actor_test_histograms/rf3actor_test_evaluation.png")
+            # plot_evaluation_results(self.eval_num_photons, self.eval_eps_rel_cleared_percentage, output_path="tests/test_data/rf3actor_test_histograms/rf3actor_test_evaluation.png")
         
             store_rf3_file(self.crf, "tests/test_data/rf3actor_test_histograms/rf3actor_test")
         
