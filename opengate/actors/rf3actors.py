@@ -1,93 +1,86 @@
-import numpy as np
 import threading
+
 import numpy as np
 import opengate_core as g4
+from RadFiled3D.RadFiled3D import CartesianRadiationField, DType, vec3
 
-from .digitizers import DigitizerBase
+from radiation_simulation.analysis.utils import store_rf3_file
+from radiation_simulation.calculations import (
+    dda_batch_raycast,
+)
+from radiation_simulation.calculations.update_voxel_grid import (
+    evaluate_relative_errors,
+    update_grids_numba,
+)
+from radiation_simulation.visualization.two_d import plot_evaluation_results
+
 
 from ..base import process_cls
-
-from RadFiled3D.RadFiled3D import CartesianRadiationField, vec3, DType
-
-from radiation_simulation.calculations.bresenham import (
-    bresenham_batch_trajectories,
-)
-from radiation_simulation.calculations.dda import (
-    dda_batch_raycast_between_points,
-)
-from radiation_simulation.calculations.utils import scale_positions_to_voxel_grid
-from radiation_simulation.calculations.update_voxel_grid import (
-    update_grids_numba,
-    evaluate_relative_errors,
-)
-
-from radiation_simulation.calculations.utils import (
-    scale_positions_to_voxel_grid,
-)
-from radiation_simulation.visualization.three_d import plot_3d_heatmap
-from radiation_simulation.visualization.two_d import (
-    plot_voxel_histograms_2d,
-    plot_evaluation_results,
-)
-from radiation_simulation.analysis.utils import load_rf3_file, store_rf3_file
+from .digitizers import DigitizerBase
 
 
-class RF3Actor(DigitizerBase, g4.GateRF3Actor): # type: ignore
+class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
     user_info_defaults = {
         "hits_batch_size": (
             5_000,
             {
-                "doc": "FIXME",
+                "doc": "Number of hits collected by a thread before processing them.",
             },
         ),
         "hits_eval_size": (
             60_000,
             {
-                "doc": "FIXME",
+                "doc": "Number of total hits collected before evaluating the relative error.",
             },
         ),
         "rel_error_treshold": (
             0.050,
             {
-                "doc": "FIXME",
+                "doc": "Relative error threshold per voxel to stop the simulation.",
             },
         ),
         "rel_error_percentile": (
             0.950,
             {
-                "doc": "FIXME",
+                "doc": "Percentile of voxels to clear rel_error_threshold to stop the simulation.",
             },
         ),
         "max_energy": (
             125,
             {
-                "doc": "FIXME",
+                "doc": "Max energy produced by the source in keV.",
             },
         ),
         "num_bins": (
             25,
             {
-                "doc": "FIXME",
+                "doc": "Number of energy bins of the voxel histograms.",
             },
         ),
         "update_histograms_threshold": (
             10,
             {
-                "doc": "FIXME",
+                "doc": "Number of hits per voxel to update the histograms.",
             },
         ),
         "voxel_size": (
             5,
             {
-                "doc": "FIXME",
+                "doc": "Size of a single voxel side in mm. The voxel grid is cubic.",
             },
         ),
-        "trace_mode": (
-            "round_safe",
+        "file_name": (
+            "rf3actor.rf3",
             {
-                "doc": "FIXME",
+                "doc": "Name of the output RF3 file.",
             },
         ),
+        # "trace_mode": (
+        #     "round_safe",
+        #     {
+        #         "doc": "FIXME",
+        #     },
+        # ),
     }
 
     # TODO: Die defaults sind fucky, es wird nichts zugewiesen
@@ -132,7 +125,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor): # type: ignore
         self.__initcpp__()
 
     def __initcpp__(self) -> None:
-        g4.GateRF3Actor.__init__(self, self.user_info) # type: ignore
+        g4.GateRF3Actor.__init__(self, self.user_info)  # type: ignore
 
     def initialize(self) -> None:
         # call the initialize() method from the super class (python-side)
@@ -141,7 +134,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor): # type: ignore
         world_size = np.array(
             self.simulation.volume_manager.world_volume.size
         )  # Convert to m
-        self.world_limits = np.stack([-world_size // 2, world_size // 2], axis=1)
+        self.world_limits = np.stack([-world_size // 2, world_size // 2], axis=1)  # type: ignore
         self.world_size = world_size / 1000
         self.voxel_size = self.user_info["voxel_size"] / 1000  # Convert to m
 
@@ -186,11 +179,6 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor): # type: ignore
         self.InitializeCpp()
         self.SetCallbackFunction(self.process_data)
 
-        # print(self)
-        # print(self.user_info)
-        # print(self.filters)
-        # exit()
-
     # def __getstate__(self)-> dict:
     #     # needed to not pickle objects that cannot be pickled (g4, cuda, lock, etc).
     #     return_dict = super().__getstate__()
@@ -205,35 +193,22 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor): # type: ignore
         # Get values from sim
         pre_positions = actor.GetPrePosition()
         post_positions = actor.GetPostPosition()
-        positions = np.array([pre_positions, post_positions])  # Shape: (2, num_hits, 3)
-        # voxelized_positions = scale_positions_to_voxel_grid(
-        #     self.world_limits,
-        #     positions,
-        #     np.array(self.energy_grid.shape), # type: ignore
-        # )
-        # print(positions)
-        # print(voxelized_positions)
-        # exit()
 
-        # print(voxelized_positions[0])
-        # print(voxelized_positions[1])
-        # exit()
-
-        grid_indices, trajectory_ids = dda_batch_raycast_between_points(
-            positions, 
-            self.voxel_size * 1000, #mm to m # type: ignore
-            self.world_limits,
-            np.array(self.energy_grid.shape), # type: ignore
-            progress=False
+        grid_indices, trajectory_ids = dda_batch_raycast(
+            start_positions=pre_positions,
+            end_positions=post_positions,
+            voxel_size=self.voxel_size * 1000,  # mm to m # type: ignore
+            world_limits=self.world_limits,
+            grid_shape=np.array(self.energy_grid.shape),  # type: ignore
         )
 
-        # grid_indices = np.array(grid_indices, dtype=np.uint16)  # Shape: (3, num_hits)
-        # trajectory_ids = np.array(trajectory_ids, dtype=np.uint32)  # Shape: (num_hits,)
         energies_flat = np.array(
             energies[trajectory_ids], dtype=np.float32
         )  # Shape: (num_hits,)
         bin_indices = np.clip(
-            (energies_flat / self.bin_width), 0, self.num_bins - 1 # type: ignore
+            (energies_flat / self.bin_width),  # type: ignore
+            0,
+            self.num_bins - 1,  # type: ignore
         ).astype(np.uint16)
 
         with self.calc_lock:
@@ -248,15 +223,15 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor): # type: ignore
                 np.ascontiguousarray(self.histogram_variances),
                 np.ascontiguousarray(grid_indices),
                 np.ascontiguousarray(bin_indices),
-                update_histograms_threshold=self.update_histograms_threshold, # type: ignore
+                update_histograms_threshold=self.update_histograms_threshold,  # type: ignore
             )
 
-            self.current_num_callbacks += 1 # type: ignore
+            self.current_num_callbacks += 1  # type: ignore
 
         with self.eval_lock:
-            if self.current_num_callbacks >= self.num_callbacks_to_eval: # type: ignore
+            if self.current_num_callbacks >= self.num_callbacks_to_eval:  # type: ignore
                 print(
-                    f"Evaluating with {g4.GateRF3Actor.GetNumberOfAbsorbedEvents(self)} Photons." # type: ignore
+                    f"Evaluating with {g4.GateRF3Actor.GetNumberOfAbsorbedEvents(self)} Photons."  # type: ignore
                 )
                 self.current_num_callbacks = 0
 
@@ -267,29 +242,27 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor): # type: ignore
                 )
 
                 rel_error_percentile_idx = int(
-                    self.eps_rel.size * self.rel_error_percentile # type: ignore
+                    self.eps_rel.size * self.rel_error_percentile  # type: ignore
                 )
-                sorted_eps_rel = np.sort(self.eps_rel, axis=None) # type: ignore
-                print(sorted_eps_rel[::20000])
-                # print(f"Eps_rel {rel_error_percentile * 100}% Quantil {sorted_eps_rel[rel_error_percentile_idx]}")
-                # sorted_eps_rel = np.partition(self.eps_rel.ravel(), rel_error_percentile_idx)
+                sorted_eps_rel = np.sort(self.eps_rel, axis=None)  # type: ignore
+
                 quantile_value = sorted_eps_rel[rel_error_percentile_idx]
                 print(
-                    f"Eps_rel {self.rel_error_percentile * 100}% Quantil {quantile_value}" # type: ignore
+                    f"Eps_rel {self.rel_error_percentile * 100}% Quantil {quantile_value}"  # type: ignore
                 )
                 print(
-                    f"Percentage of voxels with eps_rel < {quantile_value}: {np.sum(self.eps_rel < quantile_value) / self.eps_rel.size * 100:.2f}%" # type: ignore
+                    f"Percentage of voxels with eps_rel < {quantile_value}: {np.sum(self.eps_rel < quantile_value) / self.eps_rel.size * 100:.2f}%"  # type: ignore
                 )
 
                 self.eval_num_photons.append(
-                    g4.GateRF3Actor.GetNumberOfAbsorbedEvents(self) # type: ignore
+                    g4.GateRF3Actor.GetNumberOfAbsorbedEvents(self)  # type: ignore
                 )
                 self.eval_eps_rel_cleared_percentage.append(
-                    np.sum(self.eps_rel < quantile_value) / self.eps_rel.size * 100 # type: ignore
+                    np.sum(self.eps_rel < quantile_value) / self.eps_rel.size * 100  # type: ignore
                 )
 
                 if quantile_value <= self.rel_error_treshold:
-                    g4.GateRF3Actor.StopSimulation(self) # type: ignore
+                    g4.GateRF3Actor.StopSimulation(self)  # type: ignore
                     print("Threshold cleared, stopping simulation.")
                 else:
                     print("Threshold not cleared, continuing simulation.")
@@ -299,15 +272,15 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor): # type: ignore
 
     def StartSimulationAction(self) -> None:
         DigitizerBase.StartSimulationAction(self)
-        g4.GateRF3Actor.StartSimulationAction(self) # type: ignore
+        g4.GateRF3Actor.StartSimulationAction(self)  # type: ignore
 
     def EndSimulationAction(self) -> None:
         with self.eval_lock:
             print(
-                f"Generated Photons: {g4.GateRF3Actor.GetNumberOfAbsorbedEvents(self)}" # type: ignore
+                f"Generated Photons: {g4.GateRF3Actor.GetNumberOfAbsorbedEvents(self)}"  # type: ignore
             )
-            print(f"Registered Hits: {g4.GateRF3Actor.GetNumberOfHits(self)}") # type: ignore
-            g4.GateRF3Actor.EndSimulationAction(self) # type: ignore
+            print(f"Registered Hits: {g4.GateRF3Actor.GetNumberOfHits(self)}")  # type: ignore
+            g4.GateRF3Actor.EndSimulationAction(self)  # type: ignore
             DigitizerBase.EndSimulationAction(self)
 
             # plot_3d_heatmap(self.energy_grid, self.world_limits, (self.voxel_size, self.voxel_size, self.voxel_size))
@@ -319,11 +292,15 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor): # type: ignore
             # for idx in indices_array:
             #     plot_voxel_histograms_2d(self.histogram_grid, "tests/test_data/rf3actor_test_histograms", idx)
 
-            # plot_evaluation_results(self.eval_num_photons, self.eval_eps_rel_cleared_percentage, output_path="tests/test_data/rf3actor_test_histograms/rf3actor_test_evaluation.png")
+            plot_evaluation_results(
+                self.eval_num_photons,
+                self.eval_eps_rel_cleared_percentage,
+                output_path=self.simulation.output_dir,
+            )
 
             store_rf3_file(
-                self.crf, "tests/test_data/rf3actor_test_histograms/rf3actor_test"
-            )
+                self.crf, self.simulation.output_dir / self.user_info["file_name"]
+            )  # type: ignore
 
         # TODO: hits grid mit histogram_grid berechnen
         del self.calc_lock  # Cannot be pickled
