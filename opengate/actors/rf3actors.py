@@ -33,7 +33,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
                 "doc": "Number of total hits collected before evaluating the relative error.",
             },
         ),
-        "rel_error_treshold": (
+        "rel_error_threshold": (
             0.050,
             {
                 "doc": "Relative error threshold per voxel to stop the simulation.",
@@ -69,8 +69,14 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
                 "doc": "Size of a single voxel side in mm. The voxel grid is cubic.",
             },
         ),
-        "file_name": (
-            "rf3actor.rf3",
+        "channel_name": (
+            "voxel_world_actor",
+            {
+                "doc": "Name of the used rf3 channel.",
+            },
+        ),
+        "output_filename": (
+            "rf3_actor.rf3",
             {
                 "doc": "Name of the output RF3 file.",
             },
@@ -105,7 +111,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
         self.histogram_update_counts = None
         self.histogram_variances = None
         self.histogram_variances_means = None
-        self.update_histograms_threshold = None
+        self.update_histogram_threshold = None
 
         self.hits_batch_size = None
         self.hits_eval_size = None
@@ -114,7 +120,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
 
         self.eps_rel = None
         self.rel_error_percentile = None
-        self.rel_error_treshold = None
+        self.rel_error_threshold = None
 
         self.eval_num_photons = []
         self.eval_eps_rel_cleared_percentage = []
@@ -142,7 +148,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
             vec3(self.world_size[0], self.world_size[1], self.world_size[2]),
             vec3(self.voxel_size, self.voxel_size, self.voxel_size),
         )
-        channel = self.crf.add_channel("test")  # TODO: fix name
+        channel = self.crf.add_channel(self.user_info["channel_name"])
 
         channel.add_layer("energies", "MeV", DType.FLOAT64)
         channel.add_layer("hits", "count", DType.UINT64)
@@ -168,7 +174,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
         self.num_callbacks_to_eval = self.hits_eval_size // self.hits_batch_size
         self.current_num_callbacks = 0
         self.rel_error_percentile = self.user_info["rel_error_percentile"]
-        self.rel_error_treshold = self.user_info["rel_error_treshold"]
+        self.rel_error_threshold = self.user_info["rel_error_threshold"]
 
         channel.add_layer("eps_rel", "percent", DType.FLOAT32)
         self.eps_rel = channel.get_layer_as_ndarray("eps_rel")
@@ -261,7 +267,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
                     np.sum(self.eps_rel < quantile_value) / self.eps_rel.size * 100  # type: ignore
                 )
 
-                if quantile_value <= self.rel_error_treshold:
+                if quantile_value <= self.rel_error_threshold:
                     g4.GateRF3Actor.StopSimulation(self)  # type: ignore
                     print("Threshold cleared, stopping simulation.")
                 else:
@@ -299,7 +305,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
             )
 
             store_rf3_file(
-                self.crf, self.simulation.output_dir / self.user_info["file_name"]
+                self.crf, self.simulation.output_dir / self.user_info["output_filename"]
             )  # type: ignore
 
         # TODO: hits grid mit histogram_grid berechnen
@@ -378,7 +384,7 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
     #             self.eval_num_photons.append(g4.GateRF3Actor.GetNumberOfAbsorbedEvents(self))
     #             self.eval_eps_rel_cleared_percentage.append(np.sum(self.eps_rel < quantile_value) / self.eps_rel.size * 100)
 
-    #             if quantile_value <= self.rel_error_treshold:
+    #             if quantile_value <= self.rel_error_threshold:
     #                 g4.GateRF3Actor.StopSimulation(self)
     #                 print("Threshold cleared, stopping simulation.")
     #             else:
