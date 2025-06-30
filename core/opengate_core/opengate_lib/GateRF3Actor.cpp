@@ -16,7 +16,7 @@ G4Mutex LocalThreadDataMutex = G4MUTEX_INITIALIZER;
 G4Condition sBarrierCondition = G4CONDITION_INITIALIZER; 
 
 GateRF3Actor::GateRF3Actor(py::dict &user_info): GateVActor(user_info, true) {
-  // fActions.insert("StartSimulationAction");
+  fActions.insert("StartSimulationAction");
   fActions.insert("BeginOfRunAction");
   fActions.insert("BeginOfEventAction");
   fActions.insert("PreUserTrackingAction");
@@ -25,7 +25,7 @@ GateRF3Actor::GateRF3Actor(py::dict &user_info): GateVActor(user_info, true) {
   fActions.insert("EndOfRunAction");
   fActions.insert("EndOfEventAction");
   // fActions.insert("EndOfSimulationWorkerAction");
-  // fActions.insert("EndSimulationAction");
+  fActions.insert("EndSimulationAction");
   fActions.insert("BeginOfRunActionMasterThread");
   fActions.insert("EndOfRunActionMasterThread");
 
@@ -48,16 +48,16 @@ void GateRF3Actor::InitializeUserInfo(py::dict &user_info) {
 }
 
 void GateRF3Actor::InitializeCpp() {
-  GateVActor::InitializeCpp();
+  // GateVActor::InitializeCpp();
   sNumThreads = G4Threading::GetNumberOfRunningWorkerThreads();
   fNumberOfAbsorbedEvents = 0;
   fNumberOfHits = 0;
 }
 
-// void GateRF3Actor::StartSimulationAction() {
-//   fTotalNumberOfEntries = 0;
-//   fNumberOfAbsorbedEvents = 0;
-// }
+void GateRF3Actor::StartSimulationAction() {
+  // fTotalNumberOfEntries = 0;
+  // fNumberOfAbsorbedEvents = 0;
+}
 
 void GateRF3Actor::BeginOfRunActionMasterThread(int run_id) {
   runTerminationFlag = false;
@@ -66,7 +66,7 @@ void GateRF3Actor::BeginOfRunActionMasterThread(int run_id) {
 
 void GateRF3Actor::BeginOfRunAction(const G4Run *run) {
   auto &l = fThreadLocalData.Get();
-  l.fCurrentRunId = run->GetRunID();
+  // l.fCurrentRunId = run->GetRunID();
   l.fCurrentNumberOfHits = 0;
 }
 
@@ -83,18 +83,29 @@ void GateRF3Actor::EndOfRunAction(const G4Run * /*run*/) {
       sBarrierCondition.notify_all();
     }
   }
-
   
   auto &l = fThreadLocalData.Get();  // When the run ends, we send the current remaining hits to the ARF
   if (l.fCurrentNumberOfHits > 0) {
     // {
     //   G4AutoLock mutex(&LocalThreadDataMutex);
       // G4cout << "Acquired EndOfRunAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
-      fNumberOfHits += l.fCurrentNumberOfHits;
-      fCallbackFunction(this);
+    fNumberOfHits += l.fCurrentNumberOfHits;
+    fCallbackFunction(this);
       // G4cout << "Released EndOfRunAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
     // }
     ClearfThreadLocalData(l);
+  }
+
+  {
+    G4AutoLock mutex(&LocalThreadDataMutex);
+    sBarrierCount++;
+    sBarrierCondition.wait(mutex, [this]() {
+      return sBarrierCount >= sNumThreads; 
+    });
+
+    if (sBarrierCount == sNumThreads){
+      sBarrierCondition.notify_all();
+    }
   }
 }
 
@@ -184,8 +195,8 @@ void GateRF3Actor::StopSimulation() {
 // void GateRF3Actor::EndOfSimulationWorkerAction(const G4Run * /*unused*/) {
 // }
 
-// void GateRF3Actor::EndSimulationAction() {
-// }
+void GateRF3Actor::EndSimulationAction() {
+}
 
 void GateRF3Actor::SetCallbackFunction(CallbackFunctionType &f) {
     fCallbackFunction = f;
@@ -203,23 +214,23 @@ std::vector<double> GateRF3Actor::GetEnergy() const {
   return fThreadLocalData.Get().fEnergy;
 }
 
-std::vector<double> GateRF3Actor::GetPrePositionX() const {
-  return fThreadLocalData.Get().fPrePositionX;
-}
+// std::vector<double> GateRF3Actor::GetPrePositionX() const {
+//   return fThreadLocalData.Get().fPrePositionX;
+// }
 
-std::vector<double> GateRF3Actor::GetPrePositionY() const {
-  return fThreadLocalData.Get().fPrePositionY;
-}
+// std::vector<double> GateRF3Actor::GetPrePositionY() const {
+//   return fThreadLocalData.Get().fPrePositionY;
+// }
 
-std::vector<double> GateRF3Actor::GetPrePositionZ() const {
-  return fThreadLocalData.Get().fPrePositionZ;
-}
+// std::vector<double> GateRF3Actor::GetPrePositionZ() const {
+//   return fThreadLocalData.Get().fPrePositionZ;
+// }
 
 std::vector<std::array<double, 3>> GateRF3Actor::GetPrePosition() const {
-    const auto& data = fThreadLocalData.Get();
-    const auto& x = data.fPrePositionX;
-    const auto& y = data.fPrePositionY;
-    const auto& z = data.fPrePositionZ;
+    auto& data = fThreadLocalData.Get();
+    auto& x = data.fPrePositionX;
+    auto& y = data.fPrePositionY;
+    auto& z = data.fPrePositionZ;
     std::vector<std::array<double, 3>> result;
     for (size_t i = 0; i < x.size(); ++i) {
         result.push_back({x[i], y[i], z[i]});
@@ -227,23 +238,23 @@ std::vector<std::array<double, 3>> GateRF3Actor::GetPrePosition() const {
     return result;
 }
 
-std::vector<double> GateRF3Actor::GetPostPositionX() const {
-  return fThreadLocalData.Get().fPostPositionX;
-}
+// std::vector<double> GateRF3Actor::GetPostPositionX() const {
+//   return fThreadLocalData.Get().fPostPositionX;
+// }
 
-std::vector<double> GateRF3Actor::GetPostPositionY() const {
-  return fThreadLocalData.Get().fPostPositionY;
-}
+// std::vector<double> GateRF3Actor::GetPostPositionY() const {
+//   return fThreadLocalData.Get().fPostPositionY;
+// }
 
-std::vector<double> GateRF3Actor::GetPostPositionZ() const {
-  return fThreadLocalData.Get().fPostPositionZ;
-}
+// std::vector<double> GateRF3Actor::GetPostPositionZ() const {
+//   return fThreadLocalData.Get().fPostPositionZ;
+// }
 
 std::vector<std::array<double, 3>> GateRF3Actor::GetPostPosition() const {
-    const auto& data = fThreadLocalData.Get();
-    const auto& x = data.fPostPositionX;
-    const auto& y = data.fPostPositionY;
-    const auto& z = data.fPostPositionZ;
+    auto& data = fThreadLocalData.Get();
+    auto& x = data.fPostPositionX;
+    auto& y = data.fPostPositionY;
+    auto& z = data.fPostPositionZ;
     std::vector<std::array<double, 3>> result;
     for (size_t i = 0; i < x.size(); ++i) {
         result.push_back({x[i], y[i], z[i]});

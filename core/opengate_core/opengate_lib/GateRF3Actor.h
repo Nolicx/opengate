@@ -30,7 +30,7 @@ public:
     void InitializeUserInfo(py::dict &user_info) override;
 
     void InitializeCpp() override;
-    // void StartSimulationAction() override;
+    void StartSimulationAction() override;
 
     void BeginOfEventAction(const G4Event *event) override;  
     void BeginOfRunAction(const G4Run * /*run*/) override;  
@@ -42,7 +42,7 @@ public:
     void EndOfEventAction(const G4Event *event) override;
     void EndOfRunAction(const G4Run *run) override;
     // void EndOfSimulationWorkerAction(const G4Run *run) override;
-    // void EndSimulationAction() override;
+    void EndSimulationAction() override;
     
     void SetCallbackFunction(CallbackFunctionType &f);  // Set the user "apply" function (python)
 
@@ -50,13 +50,13 @@ public:
     // int GetCurrentRunId() const;
 
     std::vector<double> GetEnergy() const;
-    std::vector<double> GetPrePositionX() const;
-    std::vector<double> GetPrePositionY() const;
-    std::vector<double> GetPrePositionZ() const;
+    // std::vector<double> GetPrePositionX() const;
+    // std::vector<double> GetPrePositionY() const;
+    // std::vector<double> GetPrePositionZ() const;
     std::vector<std::array<double, 3>> GetPrePosition() const;
-    std::vector<double> GetPostPositionX() const;
-    std::vector<double> GetPostPositionY() const;
-    std::vector<double> GetPostPositionZ() const;
+    // std::vector<double> GetPostPositionX() const;
+    // std::vector<double> GetPostPositionY() const;
+    // std::vector<double> GetPostPositionZ() const;
     std::vector<std::array<double, 3>> GetPostPosition() const;
     // std::vector<double> GetDirectionX() const;
     // std::vector<double> GetDirectionY() const;
@@ -81,7 +81,7 @@ public:
         // std::vector<double> fDirectionY;    //Always Post
         // std::vector<double> fDirectionZ;    //Always Post
         int fCurrentNumberOfHits;
-        int fCurrentRunId;
+        // int fCurrentRunId;
     };
     void ClearfThreadLocalData(threadLocalT &l); 
 
