@@ -99,3 +99,8 @@ target_include_directories(opengate_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/ext
 
 #set(CMAKE_VERBOSE_MAKEFILE on)
 target_link_libraries(opengate_core PRIVATE pybind11::module ${Geant4_LIBRARIES} Threads::Threads ${ITK_LIBRARIES} fmt::fmt-header-only)
+
+#TODO: RF3 als Gate10 Submodule?
+add_subdirectory(../../RadFiled3D ${CMAKE_BINARY_DIR}/RadFiled3D)
+target_link_libraries(opengate_core PRIVATE libRadFiled3D)
+target_include_directories(opengate_core PRIVATE ../../RadFiled3D/include)

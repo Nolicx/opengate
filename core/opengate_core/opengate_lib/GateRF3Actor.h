@@ -15,6 +15,9 @@
 #include <mutex>
 #include <condition_variable>
 
+#include <RadFiled3D/storage/RadiationFieldStore.hpp>
+#include <RadFiled3D/RadiationField.hpp>
+
 namespace py = pybind11;
 
 class GateRF3Actor : public GateVActor {
