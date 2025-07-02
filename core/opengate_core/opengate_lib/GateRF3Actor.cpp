@@ -12,7 +12,7 @@
 #include "G4RunManager.hh"
 #include "digitizer/GateHelpersDigitizer.h"
 
-G4Mutex LocalThreadDataMutex = G4MUTEX_INITIALIZER;
+G4Mutex LocalThreadDataMutex_2 = G4MUTEX_INITIALIZER;
 G4Condition sBarrierCondition = G4CONDITION_INITIALIZER; 
 
 GateRF3Actor::GateRF3Actor(py::dict &user_info): GateVActor(user_info, true) {
@@ -73,7 +73,7 @@ void GateRF3Actor::BeginOfRunAction(const G4Run *run) {
 void GateRF3Actor::EndOfRunAction(const G4Run * /*run*/) {
   // Synchronize all threads at the end of the run
   {
-    G4AutoLock mutex(&LocalThreadDataMutex);
+    G4AutoLock mutex(&LocalThreadDataMutex_2);
     sBarrierCount++;
     sBarrierCondition.wait(mutex, [this]() {
       return sBarrierCount >= sNumThreads; 
@@ -87,7 +87,7 @@ void GateRF3Actor::EndOfRunAction(const G4Run * /*run*/) {
   auto &l = fThreadLocalData.Get();  // When the run ends, we send the current remaining hits to the ARF
   if (l.fCurrentNumberOfHits > 0) {
     // {
-    //   G4AutoLock mutex(&LocalThreadDataMutex);
+    //   G4AutoLock mutex(&LocalThreadDataMutex_2);
       // G4cout << "Acquired EndOfRunAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
     fNumberOfHits += l.fCurrentNumberOfHits;
     fCallbackFunction(this);
@@ -97,7 +97,7 @@ void GateRF3Actor::EndOfRunAction(const G4Run * /*run*/) {
   }
 
   {
-    G4AutoLock mutex(&LocalThreadDataMutex);
+    G4AutoLock mutex(&LocalThreadDataMutex_2);
     sBarrierCount++;
     sBarrierCondition.wait(mutex, [this]() {
       return sBarrierCount >= sNumThreads; 
@@ -138,7 +138,7 @@ void GateRF3Actor::ClearfThreadLocalData(threadLocalT &l) {
 
 void GateRF3Actor::BeginOfEventAction(const G4Event * /*event*/) {
   {
-    G4AutoLock mutex(&LocalThreadDataMutex);
+    G4AutoLock mutex(&LocalThreadDataMutex_2);
     fNumberOfAbsorbedEvents += 1; // Increment generated photon count 
   }
 }
@@ -171,7 +171,7 @@ void GateRF3Actor::SteppingAction(G4Step *step) {
 
   if (l.fCurrentNumberOfHits >= fHitsBatchSize) { //Maybe use BatchSize
     // {
-    //   G4AutoLock mutex(&LocalThreadDataMutex);
+    //   G4AutoLock mutex(&LocalThreadDataMutex_2);
     //   G4cout << "Acquired SteppingAction, thread ID: " << G4Threading::G4GetThreadId() << G4endl;
       fNumberOfHits += l.fCurrentNumberOfHits; 
       fCallbackFunction(this);
@@ -273,5 +273,4 @@ std::vector<std::array<double, 3>> GateRF3Actor::GetPostPosition() const {
 // std::vector<double> GateRF3Actor::GetDirectionZ() const {
 //   return fThreadLocalData.Get().fDirectionZ;
 // }
-
 

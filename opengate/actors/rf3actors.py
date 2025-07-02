@@ -19,6 +19,150 @@ from ..base import process_cls
 from .digitizers import DigitizerBase
 
 
+class RF3ActorV2(DigitizerBase, g4.GateRF3ActorV2):  # type: ignore
+    user_info_defaults = {
+        "events_eval_size": (
+            60_000,
+            {
+                "doc": "Number of total hits collected before evaluating the relative error.",
+            },
+        ),
+        "rel_error_threshold": (
+            0.050,
+            {
+                "doc": "Relative error threshold per voxel to stop the simulation.",
+            },
+        ),
+        "rel_error_percentile": (
+            0.950,
+            {
+                "doc": "Percentile of voxels to clear rel_error_threshold to stop the simulation.",
+            },
+        ),
+        "max_energy": (
+            125,
+            {
+                "doc": "Max energy produced by the source in keV.",
+            },
+        ),
+        "num_bins": (
+            25,
+            {
+                "doc": "Number of energy bins of the voxel histograms.",
+            },
+        ),
+        "update_histograms_threshold": (
+            10,
+            {
+                "doc": "Number of hits per voxel to update the histograms.",
+            },
+        ),
+        "voxel_size": (
+            5,
+            {
+                "doc": "Size of a single voxel side in mm. The voxel grid is cubic.",
+            },
+        ),
+        "channel_name": (
+            "voxel_world_actor",
+            {
+                "doc": "Name of the used rf3 channel.",
+            },
+        ),
+        "output_filename": (
+            "rf3_actor.rf3",
+            {
+                "doc": "Name of the output RF3 file.",
+            },
+        ),
+        "tracer_type": (
+            "Linetracing",
+            {
+                "doc": "Linetracing, Sampling, Bresenham or DDA.",
+            },
+        ),
+    }
+
+    # TODO: Die defaults sind fucky, es wird nichts zugewiesen
+    def __init__(self, *args, **kwargs) -> None:
+        DigitizerBase.__init__(self, *args, **kwargs)
+
+        self.world_size = None
+        self.world_limits = None
+
+        self.eval_num_photons = []
+        self.eval_eps_rel_cleared_percentage = []
+
+        self.__initcpp__()
+
+    def __initcpp__(self) -> None:
+        g4.GateRF3ActorV2.__init__(self, self.user_info)  # type: ignore
+
+    def initialize(self) -> None:
+        # call the initialize() method from the super class (python-side)
+        DigitizerBase.initialize(self)
+
+        self.world_size = np.array(
+            self.simulation.volume_manager.world_volume.size
+        )  # Convert to m
+
+        self.eval_num_photons = []
+        self.eval_eps_rel_cleared_percentage = []
+
+        # initialize C++ side
+        self.user_info["output_path"] = self.simulation.output_dir
+        self.user_info["world_size"] = self.world_size
+        self.InitializeUserInfo(self.user_info)
+        self.InitializeCpp()
+        self.SetCallbackFunction(self.process_data)
+
+    def process_data(self, actor) -> None:
+        pass
+
+    def __getstate__(self) -> dict:
+        # needed to not pickle objects that cannot be pickled (g4, cuda, lock, etc).
+        return_dict = super().__getstate__()
+
+        # Standard values, other stuff needs too much RAM
+        standard_entries = [
+            "_simulation",
+            "number_of_warnings",
+            "_temporary_warning_cache",
+            "user_info",
+            "actor_engine",
+            "user_output",
+            "interfaces_to_user_output",
+            "mother_attached_to",
+        ]
+        for key in list(return_dict.keys()):
+            if key not in standard_entries:
+                del return_dict[key]
+
+        return return_dict
+
+    def EndOfRunActionMasterThread(self, run_index) -> None:
+        return 0  # type: ignore # Wenn kein 0, dann kackt alles ab
+
+    def StartSimulationAction(self) -> None:
+        DigitizerBase.StartSimulationAction(self)
+        g4.GateRF3ActorV2.StartSimulationAction(self)  # type: ignore
+
+    def EndSimulationAction(self) -> None:
+        print(
+            f"Generated Photons: {g4.GateRF3ActorV2.GetNumberOfAbsorbedEvents(self)}"  # type: ignore
+        )
+        # print(f"Registered Hits: {g4.GateRF3ActorV2.GetNumberOfHits(self)}")  # type: ignore
+        # DigitizerBase.EndSimulationAction(self)
+
+        plot_evaluation_results(
+            self.eval_num_photons,
+            self.eval_eps_rel_cleared_percentage,
+            output_path=self.simulation.output_dir,
+        )
+
+        g4.GateRF3ActorV2.EndSimulationAction(self)  # type: ignore
+
+
 class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
     user_info_defaults = {
         "hits_batch_size": (
@@ -355,3 +499,4 @@ class RF3Actor(DigitizerBase, g4.GateRF3Actor):  # type: ignore
 
 
 process_cls(RF3Actor)
+process_cls(RF3ActorV2)
