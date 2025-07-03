@@ -13,10 +13,6 @@
 #include <glm/vec3.hpp>
 #include <RadFiled3D/storage/RadiationFieldStore.hpp>
 
-G4Mutex LocalThreadDataMutex = G4MUTEX_INITIALIZER;
-G4Mutex CheckEvalFlagMutex = G4MUTEX_INITIALIZER;
-G4Mutex EvalMutex = G4MUTEX_INITIALIZER;
-
 GateRF3ActorV2::GateRF3ActorV2(py::dict &user_info): GateVActor(user_info, true) {
   fActions.insert("StartSimulationAction");
   fActions.insert("BeginOfRunAction");
@@ -31,10 +27,11 @@ GateRF3ActorV2::GateRF3ActorV2(py::dict &user_info): GateVActor(user_info, true)
   fActions.insert("BeginOfRunActionMasterThread");
   fActions.insert("EndOfRunActionMasterThread");
 
-  this->fNumberOfHits = 0;
-  this->fNumberOfAbsorbedEvents = 0;
-  this->evaluationFlag = false;
-  this->runTerminationFlag = false;
+  // Initialize atomic counters
+  this->numberOfHits.store(0);
+  this->numberOfAbsorbedEvents.store(0);
+  this->evaluationFlag.store(false);
+  this->runTerminationFlag.store(false);
 
   this->sNumThreads = 0;
 }
@@ -63,9 +60,11 @@ void GateRF3ActorV2::InitializeUserInfo(py::dict &user_info) {
 void GateRF3ActorV2::InitializeCpp() {
   // GateVActor::InitializeCpp();
   this->sNumThreads = G4Threading::GetNumberOfRunningWorkerThreads();
-  this->fNumberOfAbsorbedEvents = 0;
-  this->evaluationFlag = false;
-  this->fNumberOfHits = 0;
+
+  // Reset atomic counters
+  this->numberOfAbsorbedEvents.store(0);
+  this->evaluationFlag.store(false);
+  this->numberOfHits.store(0);
 
   this->crf = std::make_shared<RadFiled3D::CartesianRadiationField>(
     glm::vec3(this->worldSize[0] / 1000, this->worldSize[1] / 1000, this->worldSize[2] / 1000),
@@ -108,7 +107,7 @@ void GateRF3ActorV2::StartSimulationAction() {
 }
 
 void GateRF3ActorV2::BeginOfRunActionMasterThread(int run_id) {
-  this->runTerminationFlag = false;
+  this->runTerminationFlag.store(false);
   this->sNumThreads = G4Threading::GetNumberOfRunningWorkerThreads();
   
   // this->channel->reinitialize_layer<float>("energies", 0);
@@ -131,13 +130,9 @@ int GateRF3ActorV2::EndOfRunActionMasterThread(int run_id) {
 }
 
 void GateRF3ActorV2::BeginOfEventAction(const G4Event * /*event*/) {
-  {
-    G4AutoLock mutex(&LocalThreadDataMutex);
-    this->fNumberOfAbsorbedEvents++; // Increment generated photon count 
-    if (this->fNumberOfAbsorbedEvents % this->eventsEvalSize == 0)
-    {
-      this->evaluationFlag = true;
-    }
+  size_t currentEvents = numberOfAbsorbedEvents.fetch_add(1) + 1;
+  if (currentEvents % this->eventsEvalSize == 0) {
+      evaluationFlag.store(true);
   }
 }
 
@@ -161,7 +156,7 @@ void GateRF3ActorV2::SteppingAction(G4Step *step) {
     { // Lock the mutex for each voxel to ensure exclusive access
       std::unique_lock lock((*this->mutexes)[voxel_index]);
 
-      this->fNumberOfHits++;
+      this->numberOfHits.fetch_add(1);
 
       auto& hits = this->channel->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("hits", voxel_index).get_data();
       auto& voxel_energy = this->channel->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("energies", voxel_index);
@@ -172,6 +167,9 @@ void GateRF3ActorV2::SteppingAction(G4Step *step) {
       hits += 1;
       voxel_energy += energy;
       size_t bin_index = static_cast<size_t>(energy / this->binWidth);
+      if (bin_index >= this->numBins) {
+          bin_index = this->numBins - 1;  // Clamp to max bin
+      }
       hist_data[bin_index] += 1.f;
 
       if (hits % this->updateHistogramsThreshold == 0)
@@ -197,57 +195,65 @@ void GateRF3ActorV2::SteppingAction(G4Step *step) {
     }
   }
 
-  if (this->evaluationFlag)
+  if (this->evaluationFlag.load())
   {
+    if (this->evalMutex.try_lock())
     {
-      G4AutoLock mutex(&EvalMutex); // Only one thread should evaluate the statistical error at a time
-      this ->evaluationFlag = false; // Reset the evaluation flag
-      size_t num_voxel = this->channel->get_voxel_count();
-      std::vector<float> errors;
-      errors.reserve(num_voxel);
-
-      for (size_t i = 0; i < num_voxel; i++)
+      if (this->evaluationFlag.load())
       {
-        auto& update_counts = this->channel->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("update_counts", i).get_data();
-        if (update_counts <= 2) {
-          errors.push_back(1.f);
-          continue; // Skip voxels with insufficient counts
+        this->evaluationFlag.store(false); // Reset the evaluation flag
+        size_t num_voxel = this->channel->get_voxel_count();
+        std::vector<float> errors;
+        errors.reserve(num_voxel);
+
+        for (size_t i = 0; i < num_voxel; i++)
+        {
+          // Use shared_lock for reading during evaluation
+          std::shared_lock read_lock((*this->mutexes)[i]);
+
+          auto& update_counts = this->channel->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("update_counts", i).get_data();
+          if (update_counts <= this->MIN_UPDATE_COUNTS) {
+            errors.push_back(this->DEFAULT_ERROR_VALUE);
+            continue; // Skip voxels with insufficient counts
+          }
+
+          float sum_m2_over_counts = 0.f;
+          auto& variances = this->channel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histogram_variances", i);
+          auto* var_data = &variances.get_data();
+          for (size_t j = 0; j < this->numBins; j++) {
+            sum_m2_over_counts += var_data[j] / update_counts;
+          }
+          auto& eps_rel = this->channel->get_voxel_flat<float>("eps_rel", i);
+          eps_rel = sum_m2_over_counts * (this->VARIANCE_SCALING_FACTOR / this->numBins);
+          errors.push_back(eps_rel);
         }
 
-        float sum_m2_over_counts = 0.f;
-        auto& variances = this->channel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histogram_variances", i);
-        auto* var_data = &variances.get_data();
-        for (size_t j = 0; j < this->numBins; j++) {
-          sum_m2_over_counts += var_data[j] / update_counts;
+        std::sort(errors.begin(), errors.end());
+        size_t percentile_idx = static_cast<size_t>(errors.size() * this->relErrorPercentile);
+        float quantile_value = errors[percentile_idx];
+        float cleared_percentage = 0.f;
+        for (const auto& err : errors) {
+          if (err < quantile_value) {
+            cleared_percentage += 1.f;
+          }
         }
-        auto& eps_rel = this->channel->get_voxel_flat<float>("eps_rel", i);
-        eps_rel = sum_m2_over_counts * (4.0f / this->numBins);
-        errors.push_back(eps_rel);
-      }
+        cleared_percentage = (cleared_percentage / errors.size()) * 100.f;
 
-      std::sort(errors.begin(), errors.end());
-      size_t percentile_idx = static_cast<size_t>(errors.size() * this->relErrorPercentile);
-      float quantile_value = errors[percentile_idx];
-      float cleared_percentage = 0.f;
-      for (const auto& err : errors) {
-        if (err < quantile_value) {
-          cleared_percentage += 1.f;
+        size_t currentAbsorbedEvents = numberOfAbsorbedEvents.load();
+        G4cout << "Evaluating with " << currentAbsorbedEvents << " Photons." << G4endl;
+        G4cout << "Eps_rel " << this->relErrorPercentile * 100 << "% Quantile: " << quantile_value << G4endl;
+        G4cout << "Percentage of voxels with eps_rel < " << quantile_value << ": " << cleared_percentage << "%" << G4endl;
+
+        if (quantile_value <= this->relErrorThreshold) {
+          this->StopSimulation();
+          G4cout << "Threshold cleared, stopping simulation." << G4endl;
+        } else {
+          G4cout << "Threshold not cleared, continuing simulation." << G4endl;
         }
       }
-      cleared_percentage = (cleared_percentage / errors.size()) * 100.f;
-
-      G4cout << "Evaluating with " << fNumberOfAbsorbedEvents << " Photons." << G4endl;
-      G4cout << "Eps_rel " << this->relErrorPercentile * 100 << "% Quantile: " << quantile_value << G4endl;
-      G4cout << "Percentage of voxels with eps_rel < " << quantile_value << ": " << cleared_percentage << "%" << G4endl;
-
-      if (quantile_value <= this->relErrorThreshold) {
-        this->StopSimulation();
-        G4cout << "Threshold cleared, stopping simulation." << G4endl;
-      } else {
-        G4cout << "Threshold not cleared, continuing simulation." << G4endl;
-      }
-    }
-  } 
+      this->evalMutex.unlock();
+    } 
+  }
 }
 
 void GateRF3ActorV2::EndOfEventAction(const G4Event *event) {
