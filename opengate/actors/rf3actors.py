@@ -4,15 +4,15 @@ import numpy as np
 import opengate_core as g4
 from RadFiled3D.RadFiled3D import CartesianRadiationField, DType, vec3
 
-from radiation_simulation.analysis.utils import store_rf3_file
-from radiation_simulation.calculations import (
+from simdos.analysis.utils import store_rf3_file
+from simdos.calculations import (
     dda_batch_raycast,
 )
-from radiation_simulation.calculations.update_voxel_grid import (
+from simdos.calculations.update_voxel_grid import (
     evaluate_relative_errors,
     update_grids_numba,
 )
-from radiation_simulation.visualization.two_d import plot_evaluation_results
+from simdos.visualization.two_d import plot_evaluation_results
 
 
 from ..base import process_cls
