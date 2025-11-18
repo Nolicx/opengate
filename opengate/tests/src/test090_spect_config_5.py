@@ -18,7 +18,7 @@ if __name__ == "__main__":
     cm = g4_units.cm
 
     # make it FF scatter
-    sc.free_flight_config.scatter_activity = 1e3 * Bq
+    sc.free_flight_config.scatter_activity = 2e4 * Bq
     sc.free_flight_config.angle_tolerance = 15 * deg
     sc.free_flight_config.angle_tolerance_min_distance = 6 * cm
     sc.free_flight_config.max_compton_level = 5
@@ -27,7 +27,7 @@ if __name__ == "__main__":
 
     # create the simulation
     sim = gate.Simulation()
-    sim.random_seed = 123654987
+    sim.random_seed = 666
     sc.setup_simulation_ff_scatter(sim, visu=False)
     stats = sim.actor_manager.find_actors("stats")[0]
 
@@ -36,7 +36,15 @@ if __name__ == "__main__":
 
     # we check only that the output files exist
     is_ok = True
-    is_ok = check_stats_file(5409, sc, stats, is_ok)
-    is_ok = check_projection_files(sim, paths, stats, is_ok)
+    is_ok = check_stats_file(108300, sc, stats, is_ok)
+    is_ok = check_projection_files(
+        sim,
+        paths,
+        stats,
+        is_ok,
+        tol=30,
+        output_ref=paths.output_ref / "scatter",
+        axis="x",
+    )
 
     utility.test_ok(is_ok)

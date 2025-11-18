@@ -1,8 +1,6 @@
 from typing import List
-
 import numpy as np
 from scipy.spatial.transform import Rotation
-
 import opengate_core as g4
 from ..base import process_cls
 from .base import ActorBase
@@ -552,6 +550,7 @@ class DigitizerSpatialBlurringActor(
     blur_fwhm: float
     blur_sigma: float
     keep_in_solid_limits: bool
+    use_truncated_Gaussian: bool
 
     user_info_defaults = {
         "attributes": (
@@ -581,25 +580,31 @@ class DigitizerSpatialBlurringActor(
         "blur_attribute": (
             None,
             {
-                "doc": "FIXME",
+                "doc": "Which attribute to blur, e.g. PostPosition.",
             },
         ),
         "blur_fwhm": (
             None,
             {
-                "doc": "FIXME",
+                "doc": "FWHM for the blurring.",
             },
         ),
         "blur_sigma": (
             None,
             {
-                "doc": "FIXME",
+                "doc": "std. dev. for the blurring.",
             },
         ),
         "keep_in_solid_limits": (
             True,
             {
-                "doc": "FIXME",
+                "doc": "If the blurring move the position outside the solid limits, keep the point inside, on the boundary",
+            },
+        ),
+        "use_truncated_Gaussian": (
+            True,
+            {
+                "doc": "Apply a truncated Gaussian distribution to blur the position when close to the solid limits.",
             },
         ),
     }
@@ -940,7 +945,7 @@ class DigitizerProjectionActor(DigitizerBase, g4.GateDigitizerProjectionActor):
 
     @property
     def output_spacing(self):
-        # consider 3D images, third dimension can be the energy windows
+        # consider 3D images, the third dimension can be the energy windows
         output_spacing = list(self.spacing)
         if len(output_spacing) != 2:
             fatal(
@@ -1045,7 +1050,7 @@ class DigitizerProjectionActor(DigitizerBase, g4.GateDigitizerProjectionActor):
             )
             self.EnableSquaredImage(True)
 
-        # keep initial origin
+        # keep the initial origin
         self.start_output_origin = list(
             self.user_output.counts.data_per_run[0].get_image_properties()[0].origin
         )
@@ -1071,7 +1076,7 @@ class DigitizerProjectionActor(DigitizerBase, g4.GateDigitizerProjectionActor):
         self.user_output.counts.merged_data.SetSpacing(list(spacing))
         self.user_output.counts.merged_data.SetOrigin(list(origin))
 
-        # remove the image for run 0 as result is in merged_data
+        # remove the image for run 0 as the result is in merged_data
         self.user_output.counts.data_per_run.pop(0)
 
         self.user_output.counts.write_data_if_requested(which="merged")

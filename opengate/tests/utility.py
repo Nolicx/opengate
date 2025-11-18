@@ -442,6 +442,10 @@ def assert_images(
     s = np.sum(d2)
     d1 = d1 / s
     d2 = d2 / s
+    if len(d2) == 0:
+        print_test(False, f"Error, the second image is empty (or only contains zero?")
+        is_ok = False
+
     if test_sad:
         # sum of absolute difference (in %)
         sad = np.fabs(d1 - d2).sum() * 100
@@ -1090,14 +1094,87 @@ def open_root_as_np(root_file, tree_name):
 
 
 # https://stackoverflow.com/questions/4527942/comparing-two-dictionaries-and-checking-how-many-key-value-pairs-are-equal
-def dict_compare(d1, d2):
-    d1_keys = set(d1.keys())
-    d2_keys = set(d2.keys())
+def dict_compare(d1, d2, tolerance=1e-6, ignored_keys=None, parent_key=""):
+    """
+    Compare two dictionaries with a tolerance for float values and optional keys to ignore.
+
+    Args:
+        d1, d2: Dictionaries to compare
+        tolerance: Float tolerance for float values
+        ignored_keys: List of keys that are optional
+        parent_key: Internal use for tracking nested key path
+    """
+    ignored_keys = set() if ignored_keys is None else set(ignored_keys)
+
+    # Get all keys excluding optional ones
+    d1_keys = set(d1.keys()) - ignored_keys
+    d2_keys = set(d2.keys()) - ignored_keys
     shared_keys = d1_keys.intersection(d2_keys)
     added = d1_keys - d2_keys
     removed = d2_keys - d1_keys
-    modified = {o: (d1[o], d2[o]) for o in shared_keys if d1[o] != d2[o]}
-    same = set(o for o in shared_keys if d1[o] == d2[o])
+
+    # Print added and removed keys (only for non-optional keys)
+    if added and not parent_key:
+        print("Keys added in d1:", added)
+    if removed and not parent_key:
+        print("Keys removed in d2:", removed)
+
+    def compare_arrays(arr1, arr2, key):
+        """Compare two arrays and print differences with indices"""
+        if isinstance(arr1, list) and isinstance(arr2, list):
+            if len(arr1) != len(arr2):
+                print(
+                    f"{key}: Arrays have different lengths ({len(arr1)} vs {len(arr2)})"
+                )
+                return False
+
+            is_equal = True
+            for i, (v1, v2) in enumerate(zip(arr1, arr2)):
+                if isinstance(v1, list) and isinstance(v2, list):
+                    if not compare_arrays(v1, v2, f"{key}[{i}]"):
+                        is_equal = False
+                elif isinstance(v1, float) and isinstance(v2, float):
+                    if abs(v1 - v2) > tolerance:
+                        print(f"{key}[{i}] : {v1} vs {v2} (diff: {abs(v1 - v2)})")
+                        is_equal = False
+                elif v1 != v2:
+                    print(f"{key}[{i}] : {v1} vs {v2}")
+                    is_equal = False
+            return is_equal
+        return arr1 == arr2
+
+    # Modified comparison logic with tolerance for floats
+    def values_equal(v1, v2, key):
+        full_key = f"{parent_key}->{key}" if parent_key else key
+
+        if key in ignored_keys:
+            return True
+
+        if isinstance(v1, dict) and isinstance(v2, dict):
+            _, _, nested_modified, _ = dict_compare(
+                v1, v2, tolerance, ignored_keys, full_key
+            )
+            return len(nested_modified) == 0
+        elif isinstance(v1, list) and isinstance(v2, list):
+            return compare_arrays(v1, v2, full_key)
+        elif isinstance(v1, float) and isinstance(v2, float):
+            if abs(v1 - v2) > tolerance:
+                print(f"{full_key} : {v1} vs {v2} (diff: {abs(v1 - v2)})")
+                return False
+            return True
+        else:
+
+            if v1 != v2:
+                print(f"{full_key} : {v1} vs {v2}")
+            return v1 == v2
+
+    # Check all shared keys (including optional ones for modification tracking)
+    all_shared_keys = set(d1.keys()).intersection(set(d2.keys()))
+    modified = {
+        o: (d1[o], d2[o]) for o in all_shared_keys if not values_equal(d1[o], d2[o], o)
+    }
+    same = set(o for o in all_shared_keys if values_equal(d1[o], d2[o], o))
+
     return added, removed, modified, same
 
 
@@ -1991,6 +2068,56 @@ def np_plot_slice_v_line(ax, vline, crop_center, crop_width):
     ax.plot(y, x, color="r")
 
 
+def np_plot_slice_h_box(ax, hline, crop_center, crop_width, width):
+    """Draw a horizontal box on the slice with the same width as the profile plot"""
+    from matplotlib.patches import Rectangle
+
+    c = int(hline - (crop_center[1] - crop_width[1] / 2))
+
+    if width == 0:
+        # If width is 0, draw a single line
+        x = np.arange(0, crop_width[0])
+        y = [c] * len(x)
+        ax.plot(x, y, color="r", linewidth=1)
+    else:
+        # Draw a filled rectangle with transparency
+        rect = Rectangle(
+            (0, c - width - 0.5),
+            crop_width[0] - 1,
+            2 * width,
+            linewidth=0,
+            edgecolor="none",
+            facecolor="r",
+            alpha=0.3,
+        )
+        ax.add_patch(rect)
+
+
+def np_plot_slice_v_box(ax, vline, crop_center, crop_width, width):
+    """Draw a vertical box on the slice with the same width as the profile plot"""
+    from matplotlib.patches import Rectangle
+
+    c = int(vline - (crop_center[0] - crop_width[0] / 2))
+
+    if width == 0:
+        # If width is 0, draw a single line
+        x = np.arange(0, crop_width[1])
+        y = [c] * len(x)
+        ax.plot(y, x, color="r", linewidth=1)
+    else:
+        # Draw a filled rectangle with transparency
+        rect = Rectangle(
+            (c - width - 0.5, 0),
+            2 * width,
+            crop_width[1] - 1,
+            linewidth=0,
+            edgecolor="none",
+            facecolor="r",
+            alpha=0.3,
+        )
+        ax.add_patch(rect)
+
+
 def add_colorbar(imshow, window_level, window_width):
     cbar = plt.colorbar(
         imshow, orientation="vertical", format=StrMethodFormatter("{x:.1f}")
@@ -2013,7 +2140,9 @@ def np_plot_integrated_profile(
     ax.plot(values, profile, label=label)
 
 
-def np_plot_profile_X(ax, img, hline, num_slice, crop_center, crop_width, label, width):
+def np_plot_profile_X_old(
+    ax, img, hline, num_slice, crop_center, crop_width, label, width
+):
     c = int(hline - (crop_center[1] - crop_width[1] / 2))
     img, _ = np_img_crop(img, crop_center, crop_width)
     if width == 0:
@@ -2025,7 +2154,9 @@ def np_plot_profile_X(ax, img, hline, num_slice, crop_center, crop_width, label,
     ax.plot(x, y, label=label)
 
 
-def np_plot_profile_Y(ax, img, vline, num_slice, crop_center, crop_width, label, width):
+def np_plot_profile_Y_old(
+    ax, img, vline, num_slice, crop_center, crop_width, label, width
+):
     c = int(vline - (crop_center[0] - crop_width[0] / 2))
     img, _ = np_img_crop(img, crop_center, crop_width)
     if width == 0:
@@ -2035,6 +2166,38 @@ def np_plot_profile_Y(ax, img, vline, num_slice, crop_center, crop_width, label,
     x = np.mean(img, axis=1)
     y = np.arange(0, len(x))
     ax.plot(y, x, label=label)
+
+
+def np_plot_profile_X(
+    ax, img, hline, num_slice, crop_center, crop_width, label, width, spacing
+):
+    c = int(hline - (crop_center[1] - crop_width[1] / 2))
+    img, crop_coord = np_img_crop(img, crop_center, crop_width)
+    if width == 0:
+        img = img[num_slice, c : c + 1, :]
+    else:
+        img = img[num_slice, c - width : c + width, :]
+    y = np.mean(img, axis=0)
+    # Convert pixel indices to physical coordinates (mm)
+    x = np.arange(0, len(y)) * spacing[0] + crop_coord[0] * spacing[0]
+    ax.plot(x, y, label=label)
+    ax.set_xlabel("X (mm)")
+
+
+def np_plot_profile_Y(
+    ax, img, vline, num_slice, crop_center, crop_width, label, width, spacing
+):
+    c = int(vline - (crop_center[0] - crop_width[0] / 2))
+    img, crop_coord = np_img_crop(img, crop_center, crop_width)
+    if width == 0:
+        img = img[num_slice, :, c : c + 1]
+    else:
+        img = img[num_slice, :, c - width : c + width]
+    y = np.mean(img, axis=1)
+    # Convert pixel indices to physical coordinates (mm)
+    x = np.arange(0, len(y)) * spacing[1] + crop_coord[2] * spacing[1]
+    ax.plot(x, y, label=label)
+    ax.set_xlabel("Y (mm)")
 
 
 def np_get_circle_mean_value(img, center, radius):
@@ -2065,7 +2228,7 @@ def add_border(ax, border_color, border_width):
         spine.set_linewidth(border_width)
 
 
-def plot_compare_profile(ref_names, test_names, options):
+def plot_compare_slice_profile(ref_names, test_names, options):
     # options
     scaling = options.scaling
     n_slice = options.n_slice
@@ -2102,10 +2265,10 @@ def plot_compare_profile(ref_names, test_names, options):
         last = np_plot_slice(
             ax[0][i * n + 1], img_test[i], n_slice, ww, wl, c, w, spacing
         )
-        np_plot_slice_h_line(ax[0][i * n], hline, c, w)
-        np_plot_slice_h_line(ax[0][i * n + 1], hline, c, w)
-        np_plot_slice_v_line(ax[0][i * n], vline, c, w)
-        np_plot_slice_v_line(ax[0][i * n + 1], vline, c, w)
+        np_plot_slice_h_box(ax[0][i * n], hline, c, w, wi)
+        np_plot_slice_h_box(ax[0][i * n + 1], hline, c, w, wi)
+        np_plot_slice_v_box(ax[0][i * n], vline, c, w, wi)
+        np_plot_slice_v_box(ax[0][i * n + 1], vline, c, w, wi)
 
     # Add colorbar to the figure
     add_colorbar(last, wl, ww)
@@ -2115,10 +2278,26 @@ def plot_compare_profile(ref_names, test_names, options):
     ltest = f"{lab_test} (horizontal)"
     for i in range(len(img_ref)):
         np_plot_profile_X(
-            ax[1][i * n], img_ref[i], hline, n_slice, c, w, lref, width=wi
+            ax[1][i * n],
+            img_ref[i],
+            hline,
+            n_slice,
+            c,
+            w,
+            lref,
+            width=wi,
+            spacing=spacing,
         )
         np_plot_profile_X(
-            ax[1][i * n], img_test[i], hline, n_slice, c, w, ltest, width=wi
+            ax[1][i * n],
+            img_test[i],
+            hline,
+            n_slice,
+            c,
+            w,
+            ltest,
+            width=wi,
+            spacing=spacing,
         )
         ax[1][i * n].legend()
 
@@ -2126,10 +2305,26 @@ def plot_compare_profile(ref_names, test_names, options):
     ltest = f"{lab_test} (vertical)"
     for i in range(len(img_ref)):
         np_plot_profile_Y(
-            ax[1][i * n + 1], img_ref[i], vline, n_slice, c, w, lref, width=wi
+            ax[1][i * n + 1],
+            img_ref[i],
+            vline,
+            n_slice,
+            c,
+            w,
+            lref,
+            width=wi,
+            spacing=spacing,
         )
         np_plot_profile_Y(
-            ax[1][i * n + 1], img_test[i], vline, n_slice, c, w, ltest, width=wi
+            ax[1][i * n + 1],
+            img_test[i],
+            vline,
+            n_slice,
+            c,
+            w,
+            ltest,
+            width=wi,
+            spacing=spacing,
         )
         ax[1][i * n + 1].legend()
 
