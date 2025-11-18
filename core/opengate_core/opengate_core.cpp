@@ -644,7 +644,7 @@ PYBIND11_MODULE(opengate_core, m) {
   init_GateUniqueVolumeIDManager(m);
   init_GateUniqueVolumeID(m);
   init_GateGeometryUtils(m);
-  init_GateVolumeDepthID(m);
+  // init_GateVolumeDepthID(m);
 
   init_GateRF3Actor(m);
   init_GateRF3ActorV2(m);
