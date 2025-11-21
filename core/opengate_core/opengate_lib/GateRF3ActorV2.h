@@ -8,6 +8,7 @@
 #ifndef RF3ActorV2_h
 #define RF3ActorV2_h
 
+#include "G4Cache.hh"
 #include "GateHelpers.h"
 #include "GateVActor.h"
 #include <pybind11/stl.h>
@@ -15,15 +16,32 @@
 #include <shared_mutex>
 #include <mutex>
 #include <atomic>
-#include <shared_mutex>
 #include <string>
 #include <functional>
+#include <unordered_map>
+
+#include "G4Material.hh"
+#include "G4NistManager.hh"
+#include "G4VProcess.hh"
 
 #include <RadFiled3D/storage/RadiationFieldStore.hpp>
 #include <RadFiled3D/RadiationField.hpp>
 #include <RadFiled3D/GridTracer.hpp>
 
 namespace py = pybind11;
+
+enum class TrackStage : int {
+  BEAM,
+  ROOM,
+  OBJECT
+};
+
+enum class VoxelRegion : int {
+  WORLD  = 0,
+  OBJECT = 1,
+  CARM   = 2,
+  // später gern erweitern: PATIENT, TABLE, SHIELD, ...
+};
 
 class GateRF3ActorV2 : public GateVActor {
 
@@ -65,6 +83,16 @@ public:
     bool IsRunTerminated() const { return runTerminationFlag.load(); }
 
 private:
+    // Track classification
+    TrackStage &GetOrInitTrackStage(const G4Track *track);
+    TrackStage InferStageFromTrack(const G4Track *track) const;
+    void UpdateTrackStage(const G4Step *step, TrackStage &stage);
+
+    // New helpers
+    void InitializeVoxelRegions();
+    void AccumulateVoxelHit(size_t voxel_index, float energy, TrackStage stage);
+    void MaybeEvaluateAndStop();
+
     // Constants
     static constexpr float VARIANCE_SCALING_FACTOR = 4.0f;
     static constexpr int MIN_UPDATE_COUNTS = 2;
@@ -79,7 +107,6 @@ private:
     // Thread synchronisation
     mutable std::mutex evalMutex;
     std::shared_ptr<std::vector<std::shared_mutex>> mutexes;
-    int sNumThreads;
 
     // Configuration parameters
     std::vector<double> worldSize;
@@ -108,6 +135,15 @@ private:
     std::atomic<size_t> numberOfHits{0};
     std::atomic<bool> evaluationFlag{false};
     std::atomic<bool> runTerminationFlag{false};
+
+    G4Material* fAirMaterial = nullptr;
+
+    struct threadLocalT {
+      std::unordered_map<G4int, TrackStage> trackStages;
+      std::unordered_map<G4int, bool> everInObject;
+      std::unordered_map<G4int, bool> hasScattered;
+    };
+    G4Cache<threadLocalT> fThreadLocalData;
 };
 
-#endif // RadFiled3DActor_h
+#endif // RF3ActorV2_h
