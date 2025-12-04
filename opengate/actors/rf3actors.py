@@ -114,7 +114,6 @@ class RF3ActorV2(DigitizerBase, g4.GateRF3ActorV2):  # type: ignore
         self.user_info["world_size"] = self.world_size
         self.InitializeUserInfo(self.user_info)
         self.InitializeCpp()
-        self.SetCallbackFunction(self.process_data)
 
     def process_data(self, actor) -> None:
         pass

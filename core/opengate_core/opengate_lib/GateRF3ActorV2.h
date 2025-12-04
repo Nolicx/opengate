@@ -9,10 +9,11 @@
 #define RF3ActorV2_h
 
 #include "G4Cache.hh"
-#include "GateHelpers.h"
 #include "GateVActor.h"
+
 #include <pybind11/stl.h>
 #include <glm/glm.hpp>
+
 #include <shared_mutex>
 #include <mutex>
 #include <atomic>
@@ -20,95 +21,77 @@
 #include <functional>
 #include <unordered_map>
 
-#include "G4Material.hh"
-#include "G4NistManager.hh"
-#include "G4VProcess.hh"
-
-#include <RadFiled3D/storage/RadiationFieldStore.hpp>
 #include <RadFiled3D/RadiationField.hpp>
 #include <RadFiled3D/GridTracer.hpp>
 
 namespace py = pybind11;
 
-enum class TrackStage : int {
-  BEAM,
-  ROOM,
-  OBJECT
-};
-
+/// Static region label used to classify voxel energy deposition.
 enum class VoxelRegion : int {
   WORLD  = 0,
   OBJECT = 1,
-  CARM   = 2,
+  // CARM   = 2,
   // später gern erweitern: PATIENT, TABLE, SHIELD, ...
 };
 
+/// Actor that writes energy, spectra and statistical uncertainty into a RadFiled3D voxel grid and performs adaptive stopping.
 class GateRF3ActorV2 : public GateVActor {
 
 public:
-    // Callback function type
-    using CallbackFunctionType = std::function<void(GateRF3ActorV2 *)>;
-
     explicit GateRF3ActorV2(py::dict &user_info);
     ~GateRF3ActorV2() override;
     
-    // Initialization methods
+    // Initialization
     void InitializeUserInfo(py::dict &user_info) override;
     void InitializeCpp() override;
 
-    // Simulation action methods
+    // Simulation hooks
     void StartSimulationAction() override;
     void BeginOfEventAction(const G4Event *event) override;  
     void BeginOfRunAction(const G4Run * /*run*/) override;  
-    // void PreUserTrackingAction(const G4Track *track) override;
     void SteppingAction(G4Step *) override;     //Called when step in attached volume
     void EndOfEventAction(const G4Event *event) override;
     void EndOfRunAction(const G4Run *run) override;
-    // void EndOfSimulationWorkerAction(const G4Run *run) override;
     void EndSimulationAction() override;
-    // int GetCurrentNumberOfHits() const;
-    // int GetCurrentRunId() const;
 
-    // Master thread methods
+    // Master thread only 
     void BeginOfRunActionMasterThread(int run_id) override;  // Called at simulation start (master thread only)
     int EndOfRunActionMasterThread(int run_id) override;  // Called at simulation end (master thread only)
 
-    // Callback and control methods
-    void SetCallbackFunction(CallbackFunctionType &f);  // Set the user "apply" function (python)
+    // Control simulation termination
     void StopSimulation();
 
-    // Thread-safe getter methods
+    // Information Getters
     size_t GetNumberOfAbsorbedEvents() const { return numberOfAbsorbedEvents.load(); }
     size_t GetNumberOfHits() const { return numberOfHits.load(); }
     bool IsRunTerminated() const { return runTerminationFlag.load(); }
 
-private:
-    // Track classification
-    TrackStage &GetOrInitTrackStage(const G4Track *track);
-    TrackStage InferStageFromTrack(const G4Track *track) const;
-    void UpdateTrackStage(const G4Step *step, TrackStage &stage);
-
-    // New helpers
+  private:
+    /// Assign WORLD/OBJECT labels to each voxel via G4 navigator.
     void InitializeVoxelRegions();
-    void AccumulateVoxelHit(size_t voxel_index, float energy, TrackStage stage);
+
+    /// Accumulate a single voxel hit: energy, histogram bin, and BEAM/ROOM/OBJECT category based on `scattered`.
+    void AccumulateVoxelHit(size_t voxel_index, float energy, bool scattered);
+    
+    /// Periodic check of statistical error to decide early stopping.
     void MaybeEvaluateAndStop();
 
-    // Constants
+    // Standard values constants controlling the uncertainty estimator.
     static constexpr float VARIANCE_SCALING_FACTOR = 4.0f;
     static constexpr int MIN_UPDATE_COUNTS = 2;
     static constexpr float DEFAULT_ERROR_VALUE = 1.0f;
 
-    // Public data members (for compatibility)
+    // RadFiled3D field and access
     std::shared_ptr<RadFiled3D::CartesianRadiationField> crf;
     std::shared_ptr<RadFiled3D::VoxelGridBuffer> channel;
     std::shared_ptr<RadFiled3D::GridTracer> tracer;
     glm::vec3 half_field_dim;
 
-    // Thread synchronisation
+    // Synchronization: per-voxel locks + evaluation lock
     mutable std::mutex evalMutex;
     std::shared_ptr<std::vector<std::shared_mutex>> mutexes;
 
-    // Configuration parameters
+    // Configuration parameters (from Python)
     std::vector<double> worldSize;
     int eventsEvalSize;
     float relErrorThreshold;
@@ -123,24 +106,14 @@ private:
     std::string outputFileName;
     std::string tracerType;
 
-    // Callback function
-    CallbackFunctionType fCallbackFunction;
-
-    // int fNumberOfHits;
-    // int fNumberOfAbsorbedEvents;
-    // bool evaluationFlag;
-    // bool runTerminationFlag;
-    // Thread-safe counters and flags
+    // Thread-safe counters
     std::atomic<size_t> numberOfAbsorbedEvents{0};
     std::atomic<size_t> numberOfHits{0};
     std::atomic<bool> evaluationFlag{false};
     std::atomic<bool> runTerminationFlag{false};
 
-    G4Material* fAirMaterial = nullptr;
-
+    /// Thread-local state: trackID -> has scattered at least once.
     struct threadLocalT {
-      std::unordered_map<G4int, TrackStage> trackStages;
-      std::unordered_map<G4int, bool> everInObject;
       std::unordered_map<G4int, bool> hasScattered;
     };
     G4Cache<threadLocalT> fThreadLocalData;

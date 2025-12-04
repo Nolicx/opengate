@@ -22,7 +22,7 @@ void init_GateRF3ActorV2(py::module &m) {
         .def("EndSimulationAction", &GateRF3ActorV2::EndSimulationAction)
         .def("EndOfRunAction", &GateRF3ActorV2::EndOfRunAction)
         
-        .def("SetCallbackFunction", &GateRF3ActorV2::SetCallbackFunction)
+        // .def("SetCallbackFunction", &GateRF3ActorV2::SetCallbackFunction)
         .def("StopSimulation", &GateRF3ActorV2::StopSimulation)
         .def("GetNumberOfAbsorbedEvents", &GateRF3ActorV2::GetNumberOfAbsorbedEvents);
 }
