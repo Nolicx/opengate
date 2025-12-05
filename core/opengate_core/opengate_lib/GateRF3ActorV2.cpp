@@ -122,6 +122,26 @@ void GateRF3ActorV2::InitializeCpp() {
     this->tracer = std::make_shared<RadFiled3D::DDAGridTracer>(*channel);
   }
 
+  // --- Logging: Grid & Histogram Setup ---
+  auto counts = channel->get_voxel_counts();
+  auto dims   = channel->get_voxel_dimensions();
+
+  G4cout << "[RF3] InitializeCpp()" << G4endl;
+  G4cout << "[RF3] World size (m): "
+         << worldSize[0] / 1000.0 << " x "
+         << worldSize[1] / 1000.0 << " x "
+         << worldSize[2] / 1000.0 << G4endl;
+  G4cout << "[RF3] Voxel counts   : "
+         << counts.x << " x " << counts.y << " x " << counts.z
+         << " = " << channel->get_voxel_count() << " voxels" << G4endl;
+  G4cout << "[RF3] Voxel size (m) : "
+         << dims.x << " x " << dims.y << " x " << dims.z << G4endl;
+  G4cout << "[RF3] Energy bins    : " << numBins
+         << ", bin width = " << binWidth << " MeV" << G4endl;
+  G4cout << "[RF3] Tracer type    : " << tracerType << G4endl;
+  G4cout << "[RF3] relError p-quantile  : " << relErrorPercentile * 100.0 << " %" << G4endl;
+  G4cout << "[RF3] relError threshold   : " << relErrorThreshold << " %" << G4endl;
+
   // Precompute voxel -> region mapping using Geant4 geometry.
   this->InitializeVoxelRegions();
 }
@@ -132,6 +152,9 @@ void GateRF3ActorV2::InitializeVoxelRegions() {
 
   auto counts = channel->get_voxel_counts();
   auto dims   = channel->get_voxel_dimensions();
+
+  size_t world_count  = 0;
+  size_t object_count = 0;
 
   // For each voxel center, query the G4 volume and assign WORLD/OBJECT.
   for (int ix = 0; ix < counts.x; ++ix) {
@@ -149,10 +172,12 @@ void GateRF3ActorV2::InitializeVoxelRegions() {
           const auto &name = vol->GetName();
           if (name == "world") {
             region = VoxelRegion::WORLD;
+            world_count++;
           // } else if (name == "c_arm") {
           //   region = VoxelRegion::CARM;
           } else {
             region = VoxelRegion::OBJECT; // alles andere
+            object_count++;
           }
         }
 
@@ -162,6 +187,11 @@ void GateRF3ActorV2::InitializeVoxelRegions() {
       }
     }
   }
+
+  G4cout << "[RF3] InitializeVoxelRegions()" << G4endl;
+  G4cout << "[RF3] WORLD voxels  : " << world_count  << G4endl;
+  G4cout << "[RF3] OBJECT voxels : " << object_count << G4endl;
+
 }
 
 void GateRF3ActorV2::StartSimulationAction() {
@@ -365,26 +395,48 @@ void GateRF3ActorV2::MaybeEvaluateAndStop() {
       // Evaluate chosen percentile of eps_rel.
       std::sort(errors.begin(), errors.end());
       size_t percentile_idx = static_cast<size_t>(errors.size() * this->relErrorPercentile);
+      if (percentile_idx >= errors.size()) {
+        percentile_idx = errors.size() - 1;
+      }
       float quantile_value = errors[percentile_idx];
-      float cleared_percentage = 0.f;
+
+      size_t num_below = 0;
       for (const auto& err : errors) {
         if (err < quantile_value) {
-          cleared_percentage += 1.f;
+          ++num_below;
         }
       }
-      cleared_percentage = (cleared_percentage / errors.size()) * 100.f;
 
+      float cleared_percentage = (static_cast<float>(num_below) / errors.size()) * 100.f;
       size_t currentAbsorbedEvents = numberOfAbsorbedEvents.load();
-      G4cout << "Evaluating with " << currentAbsorbedEvents << " Photons." << G4endl;
-      G4cout << "Eps_rel " << this->relErrorPercentile * 100 << "% Quantile: " << quantile_value << G4endl;
-      G4cout << "Percentage of voxels with eps_rel < " << quantile_value << ": " << cleared_percentage << "%" << G4endl;
 
-       // Adaptive stopping criterion: stop if quantile below threshold.
-      if (quantile_value <= this->relErrorThreshold) {
+      // ----- Neue, verständliche Logs -----
+      G4cout << "\n[RF3] ===== Statistical convergence check =====" << G4endl;
+      G4cout << "[RF3] Primary photons simulated  : " << currentAbsorbedEvents << G4endl;
+      G4cout << "[RF3] Number of voxels          : " << num_voxel << G4endl;
+      G4cout << "[RF3] Target eps_rel quantile   : "
+             << (relErrorPercentile * 100.0f) << " %" << G4endl;
+      G4cout << "[RF3] Target eps_rel threshold  : "
+             << relErrorThreshold << " %" << G4endl;
+      G4cout << "[RF3] Measured eps_rel at quantile : "
+             << quantile_value << G4endl;
+      G4cout << "[RF3] Voxels below threshold (eps_rel < "
+             << relErrorThreshold << "): "
+             << num_below << " / " << num_voxel
+             << " (" << cleared_percentage << " %)" << G4endl;
+
+      bool stop = (quantile_value <= this->relErrorThreshold);
+      if (stop) {
+        G4cout << "[RF3] Convergence reached: quantile("
+               << relErrorPercentile * 100.0f << "%) = "
+               << quantile_value << " <= " << relErrorThreshold
+               << "  -> requesting stop." << G4endl;
         this->StopSimulation();
-        G4cout << "Threshold cleared, stopping simulation." << G4endl;
       } else {
-        G4cout << "Threshold not cleared, continuing simulation." << G4endl;
+        G4cout << "[RF3] Convergence NOT reached: quantile("
+               << relErrorPercentile * 100.0f << "%) = "
+               << quantile_value << " > " << relErrorThreshold
+               << "  -> continue simulation." << G4endl;
       }
     }
     this->evalMutex.unlock();
