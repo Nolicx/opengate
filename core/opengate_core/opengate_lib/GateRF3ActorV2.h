@@ -44,6 +44,7 @@ public:
     // Initialization
     void InitializeUserInfo(py::dict &user_info) override;
     void InitializeCpp() override;
+    std::shared_ptr<RadFiled3D::VoxelGridBuffer> CreateEnergyChannel(const std::string& channel_name);
 
     // Simulation hooks
     void StartSimulationAction() override;
@@ -83,9 +84,11 @@ public:
 
     // RadFiled3D field and access
     std::shared_ptr<RadFiled3D::CartesianRadiationField> crf;
-    std::shared_ptr<RadFiled3D::VoxelGridBuffer> channel;
+    std::shared_ptr<RadFiled3D::VoxelGridBuffer> generalChannel;
+    std::shared_ptr<RadFiled3D::VoxelGridBuffer> beamChannel;
+    std::shared_ptr<RadFiled3D::VoxelGridBuffer> roomChannel;
+    std::shared_ptr<RadFiled3D::VoxelGridBuffer> objectChannel;
     std::shared_ptr<RadFiled3D::GridTracer> tracer;
-    glm::vec3 half_field_dim;
 
     // Synchronization: per-voxel locks + evaluation lock
     mutable std::mutex evalMutex;
@@ -101,10 +104,19 @@ public:
     float binWidth;
     int updateHistogramsThreshold;
     float voxelSize;
-    std::string channelName;
+    std::string generalChannelName;
+    std::string beamChannelName;
+    std::string roomChannelName;
+    std::string objectChannelName;
+
     std::string outputPath;
     std::string outputFileName;
     std::string tracerType;
+
+    glm::ivec3 voxelCounts;
+    glm::vec3 voxelDims;
+    glm::vec3 halfFieldDims;
+    size_t numVoxels;
 
     // Thread-safe counters
     std::atomic<size_t> numberOfAbsorbedEvents{0};
