@@ -28,9 +28,21 @@ namespace py = pybind11;
 #endif /* __APPLE__ */
 
 #define G4VIS_BUILD_OPENGL_DRIVER
-#include "private/G4OpenGLSceneHandler.hh"
 
-#define GATEIMAGEBOX_USE_OPENGL 1
+#if __has_include("G4OpenGLSceneHandler.hh")
+  #include "G4OpenGLSceneHandler.hh"
+  #define GATE_HAS_G4OPENGL_SCENEHANDLER 1
+#elif __has_include("private/G4OpenGLSceneHandler.hh")
+  #include "private/G4OpenGLSceneHandler.hh"
+  #define GATE_HAS_G4OPENGL_SCENEHANDLER 1
+#else
+  #define GATE_HAS_G4OPENGL_SCENEHANDLER 0
+#endif
+
+#if GATE_HAS_G4OPENGL_SCENEHANDLER
+  #define GATEIMAGEBOX_USE_OPENGL 1
+#endif
+
 #endif /* G4VERSION_NUMBER */
 #endif /* DUSE_VISU */
 

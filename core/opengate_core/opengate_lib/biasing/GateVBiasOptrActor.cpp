@@ -10,7 +10,13 @@ Copyright (C): OpenGATE Collaboration
 #include "../GateHelpersDict.h"
 #include "G4LogicalVolumeStore.hh"
 #include "G4RunManager.hh"
-#include <vnl_matrix.h>
+
+#if __has_include(<vnl/vnl_matrix.h>)
+#  include <vnl/vnl_matrix.h>
+#else
+#  include <vnl_matrix.h>
+#endif
+
 
 GateVBiasOptrActor::GateVBiasOptrActor(const std::string &name,
                                        py::dict &user_info, const bool MT_ready)

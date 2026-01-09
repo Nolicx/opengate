@@ -72,7 +72,7 @@ public:
     void InitializeVoxelRegions();
 
     /// Accumulate a single voxel hit: energy, histogram bin, and BEAM/ROOM/OBJECT category based on `scattered`.
-    void AccumulateVoxelHit(size_t voxel_index, float energy, bool scattered);
+    void AccumulateVoxelHit(size_t voxel_index, float energy, float segment_length, VoxelRegion region, bool scattered);
     
     /// Periodic check of statistical error to decide early stopping.
     void MaybeEvaluateAndStop();
