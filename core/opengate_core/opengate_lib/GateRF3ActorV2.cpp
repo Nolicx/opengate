@@ -486,7 +486,7 @@ void GateRF3ActorV2::EndSimulationAction() {
 		)
 	);
 
-  this->crf->remove_channel("general");
+  // this->crf->remove_channel("general");
   this->generalChannel->remove_layer("energies");
   this->generalChannel->remove_layer("histograms");
   // this->generalChannel->remove_layer("voxel_region"); // Maybe useful later
