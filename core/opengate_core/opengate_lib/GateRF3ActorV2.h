@@ -14,7 +14,7 @@
 #include <pybind11/stl.h>
 #include <glm/glm.hpp>
 
-#include <shared_mutex>
+// #include <shared_mutex>
 #include <mutex>
 #include <atomic>
 #include <string>
@@ -30,8 +30,16 @@ namespace py = pybind11;
 enum class VoxelRegion : int {
   WORLD  = 0,
   OBJECT = 1,
+  ENCLOSURE = 2,
   // CARM   = 2,
   // später gern erweitern: PATIENT, TABLE, SHIELD, ...
+};
+
+enum class ConvergenceRegionMode : int {
+  ALL = 0,
+  NO_ENCLOSURE = 1,
+  NO_OBJECTS = 2,
+  NO_ENCLOSURE_NO_OBJECTS = 3,
 };
 
 /// Actor that writes energy, spectra and statistical uncertainty into a RadFiled3D voxel grid and performs adaptive stopping.
@@ -72,10 +80,11 @@ public:
     void InitializeVoxelRegions();
 
     /// Accumulate a single voxel hit: energy, histogram bin, and BEAM/ROOM/OBJECT category based on `scattered`.
-    void AccumulateVoxelHit(size_t voxel_index, float energy, float segment_length, VoxelRegion region, bool scattered);
+    void AccumulateVoxelHit(size_t voxelIndex, float energy, bool scattered, size_t binIndex);
     
     /// Periodic check of statistical error to decide early stopping.
     void MaybeEvaluateAndStop();
+    bool ShouldIncludeRegion(VoxelRegion region) const;
 
     // Standard values constants controlling the uncertainty estimator.
     static constexpr float VARIANCE_SCALING_FACTOR = 4.0f;
@@ -92,7 +101,7 @@ public:
 
     // Synchronization: per-voxel locks + evaluation lock
     mutable std::mutex evalMutex;
-    std::shared_ptr<std::vector<std::shared_mutex>> mutexes;
+    std::shared_ptr<std::vector<std::mutex>> mutexes;
 
     // Configuration parameters (from Python)
     std::vector<double> worldSize;
@@ -108,6 +117,9 @@ public:
     std::string beamChannelName;
     std::string roomChannelName;
     std::string objectChannelName;
+
+    ConvergenceRegionMode convergenceRegionMode = ConvergenceRegionMode::ALL;
+    std::string convergenceRegionModeString;
 
     std::string outputPath;
     std::string outputFileName;

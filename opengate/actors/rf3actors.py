@@ -81,6 +81,12 @@ class RF3ActorV2(DigitizerBase, g4.GateRF3ActorV2):  # type: ignore
                 "doc": "Linetracing, Sampling, Bresenham or DDA.",
             },
         ),
+        "convergence_region_mode": (
+            "all",
+            {
+                "doc": "Convergence filter: all, no_enclosure, no_objects, no_enclosure_no_objects.",
+            },
+        ),
     }
 
     # TODO: Die defaults sind fucky, es wird nichts zugewiesen

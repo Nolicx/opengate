@@ -12,8 +12,33 @@
 #include "G4ThreeVector.hh"
 #include "G4VProcess.hh"
 #include "GateSourceManager.h"
+#include "G4EmProcessSubType.hh"
+#include "G4Gamma.hh"
 
 #include <RadFiled3D/storage/RadiationFieldStore.hpp>
+#include "tqdm/tqdm.h"
+
+// Hollow STL Files will be marked as room inside of them
+// Object and Wall Voxels should not be needed to be checked for simulation stop
+// Need to separate humans from objects?
+// Need to separate enclosure from objects?
+
+namespace {
+VoxelRegion ClassifyPoint(G4Navigator *navigator, const G4ThreeVector &pos) {
+  G4VPhysicalVolume *vol = navigator->LocateGlobalPointAndSetup(pos);
+  if (!vol) {
+    return VoxelRegion::WORLD;
+  }
+  const auto &name = vol->GetName();
+  if (name == "world") {
+    return VoxelRegion::WORLD;
+  }
+  if (name == "room" || name == "floor" || name == "ceiling" || name.rfind("wall_", 0) == 0) {
+    return VoxelRegion::ENCLOSURE;
+  }
+  return VoxelRegion::OBJECT;
+}
+}  // namespace
 
 GateRF3ActorV2::GateRF3ActorV2(py::dict &user_info): GateVActor(user_info, true) {
   // Register which actor hooks are used.
@@ -42,6 +67,7 @@ GateRF3ActorV2::~GateRF3ActorV2() {
 
 void GateRF3ActorV2::InitializeUserInfo(py::dict &user_info) {
   // Let GateVActor handle common configuration first.
+  G4cout << "[RF3Actor] InitializeUserInfo()" << G4endl;
   GateVActor::InitializeUserInfo(user_info);
 
   // Read RF3-specific parameters from Python.
@@ -54,6 +80,28 @@ void GateRF3ActorV2::InitializeUserInfo(py::dict &user_info) {
   this->binWidth = this->maxEnergy / this->numBins;
   this->updateHistogramsThreshold = DictGetInt(user_info, "update_histograms_threshold");
   this->voxelSize = DictGetDouble(user_info, "voxel_size") / 1000; // Meter
+
+  this->convergenceRegionMode = ConvergenceRegionMode::ALL;
+  this->convergenceRegionModeString = "all";
+  if (user_info.contains("convergence_region_mode")) {
+    this->convergenceRegionModeString = DictGetStr(user_info, "convergence_region_mode");
+    if (this->convergenceRegionModeString == "all") {
+      this->convergenceRegionMode = ConvergenceRegionMode::ALL;
+    } else if (this->convergenceRegionModeString == "no_enclosure") {
+      this->convergenceRegionMode = ConvergenceRegionMode::NO_ENCLOSURE;
+    } else if (this->convergenceRegionModeString == "no_objects") {
+      this->convergenceRegionMode = ConvergenceRegionMode::NO_OBJECTS;
+    } else if (this->convergenceRegionModeString == "no_enclosure_no_objects") {
+      this->convergenceRegionMode = ConvergenceRegionMode::NO_ENCLOSURE_NO_OBJECTS;
+    } else {
+      G4cout << "[RF3Actor] Unknown convergence_region_mode '" << this->convergenceRegionModeString
+             << "', defaulting to 'all'." << G4endl;
+      this->convergenceRegionMode = ConvergenceRegionMode::ALL;
+      this->convergenceRegionModeString = "all";
+    }
+  }
+
+  G4cout << "[RF3Actor] Convergence region mode : " << this->convergenceRegionModeString << G4endl;
 
   this->generalChannelName = "general"; //DictGetStr(user_info, "channel_name");
   this->beamChannelName = "beam";
@@ -85,8 +133,8 @@ void GateRF3ActorV2::InitializeCpp() {
   this->voxelCounts = this->crf->get_voxel_counts();
   this->voxelDims = this->crf->get_voxel_dimensions();
   this->numVoxels = this->voxelCounts.x * this->voxelCounts.y * this->voxelCounts.z;
-  // One shared_mutex per voxel for thread-safe accumulation.
-  this->mutexes = std::make_shared<std::vector<std::shared_mutex>>(this->numVoxels);
+  // One mutex per voxel for thread-safe accumulation.
+  this->mutexes = std::make_shared<std::vector<std::mutex>>(this->numVoxels);
 
   // Precompute half field dimensions (mm) for coordinate transforms.
   this->halfFieldDims = glm::vec3(
@@ -101,7 +149,7 @@ void GateRF3ActorV2::InitializeCpp() {
   this->generalChannel->add_custom_layer<RadFiled3D::HistogramVoxel>("histogram_variances_means", RadFiled3D::HistogramVoxel(this->numBins, this->binWidth, nullptr), 0.f, "variances_means");
   this->generalChannel->add_custom_layer<RadFiled3D::HistogramVoxel>("histogram_variances", RadFiled3D::HistogramVoxel(this->numBins, this->binWidth, nullptr), 0.f, "variances");
   this->generalChannel->add_layer<float>("eps_rel", 1.f, "percent");
-  // Voxel region labels (WORLD / OBJECT).
+  // Voxel region labels (WORLD / OBJECT / ENCLOSURE).
   this->generalChannel->add_layer<int>("voxel_region", static_cast<int>(VoxelRegion::WORLD), "label");
   
   // Select tracer implementation.
@@ -115,15 +163,15 @@ void GateRF3ActorV2::InitializeCpp() {
     this->tracer = std::make_shared<RadFiled3D::DDAGridTracer>(*this->generalChannel);
   }
   // FIXME 
-  if (this->tracerType != "DDA") {
-    G4cout << "[RF3Actor] Forcing tracer to DDA for segment-length scoring." << G4endl;
-  }
-  this->tracer = std::make_shared<RadFiled3D::DDAGridTracer>(*this->generalChannel);
+  // if (this->tracerType != "DDA") {
+  //   G4cout << "[RF3Actor] Forcing tracer to DDA for segment-length scoring." << G4endl;
+  // }
+  // this->tracer = std::make_shared<RadFiled3D::DDAGridTracer>(*this->generalChannel);
 
   this->beamChannel = this->CreateEnergyChannel(this->beamChannelName);
   this->roomChannel = this->CreateEnergyChannel(this->roomChannelName);
   this->objectChannel = this->CreateEnergyChannel(this->objectChannelName);
-  // Track-length estimator for energy fluence: sum(E * length) per voxel.
+  // Track-length estimator for energy fluence is currently disabled.
 
   G4cout << "[RF3Actor] World size (m): " << worldSize[0] / 1000.0 << " x " << worldSize[1] / 1000.0 << " x " << worldSize[2] / 1000.0 << G4endl;
   G4cout << "[RF3Actor] Voxel counts : " << this->voxelCounts.x << " x " << this->voxelCounts.y << " x " << this->voxelCounts.z << " = " << this->voxelCounts.x * this->voxelCounts.y * this->voxelCounts.z << " voxels" << G4endl;
@@ -146,7 +194,7 @@ std::shared_ptr<RadFiled3D::VoxelGridBuffer> GateRF3ActorV2::CreateEnergyChannel
       "histograms",
       RadFiled3D::HistogramVoxel(numBins, binWidth, nullptr),
       0.f, "MeV");
-  channel->add_layer<float>("energy_fluence", 0.f, "MeV*m");
+  // channel->add_layer<float>("energy_fluence", 0.f, "MeV*m");
   return channel;
 }
 
@@ -156,30 +204,69 @@ void GateRF3ActorV2::InitializeVoxelRegions() {
   auto *transportMgr = G4TransportationManager::GetTransportationManager();
   G4Navigator *navigator = transportMgr->GetNavigatorForTracking();
 
-  size_t world_count  = 0;
-  size_t object_count = 0;
+  size_t worldCount  = 0;
+  size_t enclosureCount = 0;
+  size_t objectCount = 0;
 
-  // For each voxel center, query the G4 volume and assign WORLD/OBJECT.
-  for (int ix = 0; ix < this->voxelCounts.x; ++ix) {
+  G4cout << "[RF3Actor] Classifying voxel regions (x slices: "
+         << this->voxelCounts.x << ", total voxels: " << this->numVoxels << ")"
+         << G4endl;
+
+  // For each voxel, sample center + corners; assign WORLD only if all samples are WORLD.
+  for (int ix : tqdm::range(0, this->voxelCounts.x)) {
     for (int iy = 0; iy < this->voxelCounts.y; ++iy) {
       for (int iz = 0; iz < this->voxelCounts.z; ++iz) {
         const double x_mm = (ix + 0.5) * this->voxelDims.x * 1000.0 - this->halfFieldDims.x;
         const double y_mm = (iy + 0.5) * this->voxelDims.y * 1000.0 - this->halfFieldDims.y;
         const double z_mm = (iz + 0.5) * this->voxelDims.z * 1000.0 - this->halfFieldDims.z;
-        G4ThreeVector pos(x_mm, y_mm, z_mm);
+        const double dx = 0.5 * this->voxelDims.x * 1000.0;
+        const double dy = 0.5 * this->voxelDims.y * 1000.0;
+        const double dz = 0.5 * this->voxelDims.z * 1000.0;
 
-        G4VPhysicalVolume *vol = navigator->LocateGlobalPointAndSetup(pos);
+        size_t worldHits = 0;
+        size_t enclosureHits = 0;
+        size_t objectHits = 0;
 
-        VoxelRegion region = VoxelRegion::WORLD;
-        if (vol) {
-          const auto &name = vol->GetName();
-          if (name == "world") {
-            region = VoxelRegion::WORLD;
-            world_count++;
-          } else {
-            region = VoxelRegion::OBJECT; // alles andere
-            object_count++;
+        const G4ThreeVector center(x_mm, y_mm, z_mm);
+        VoxelRegion centerRegion = ClassifyPoint(navigator, center);
+        if (centerRegion == VoxelRegion::WORLD) {
+          ++worldHits;
+        } else if (centerRegion == VoxelRegion::ENCLOSURE) {
+          ++enclosureHits;
+        } else {
+          ++objectHits;
+        }
+
+        const double xs[2] = {x_mm - dx, x_mm + dx};
+        const double ys[2] = {y_mm - dy, y_mm + dy};
+        const double zs[2] = {z_mm - dz, z_mm + dz};
+
+        for (double sx : xs) {
+          for (double sy : ys) {
+            for (double sz : zs) {
+              const G4ThreeVector pos(sx, sy, sz);
+              VoxelRegion sampleRegion = ClassifyPoint(navigator, pos);
+              if (sampleRegion == VoxelRegion::WORLD) {
+                ++worldHits;
+              } else if (sampleRegion == VoxelRegion::ENCLOSURE) {
+                ++enclosureHits;
+              } else {
+                ++objectHits;
+              }
+            }
           }
+        }
+
+        const size_t total_hits = worldHits + enclosureHits + objectHits;
+        VoxelRegion region = VoxelRegion::OBJECT;
+        if (total_hits > 0 && (worldHits == total_hits)) { // all samples WORLD
+          region = VoxelRegion::WORLD;
+          ++worldCount;
+        } else if (enclosureHits > objectHits) {
+          region = VoxelRegion::ENCLOSURE;
+          ++enclosureCount;
+        } else {
+          ++objectCount;
         }
 
         auto &labelVoxel = this->generalChannel->get_voxel<RadFiled3D::ScalarVoxel<int>>("voxel_region", ix, iy, iz);
@@ -188,8 +275,9 @@ void GateRF3ActorV2::InitializeVoxelRegions() {
     }
   }
 
-  G4cout << "[RF3Actor] WORLD voxels : " << world_count  << G4endl;
-  G4cout << "[RF3Actor] OBJECT voxels : " << object_count << G4endl;
+  G4cout << "[RF3Actor] WORLD voxels : " << worldCount  << G4endl;
+  G4cout << "[RF3Actor] ENCLOSURE voxels : " << enclosureCount << G4endl;
+  G4cout << "[RF3Actor] OBJECT voxels : " << objectCount << G4endl;
 }
 
 void GateRF3ActorV2::StartSimulationAction() {
@@ -226,14 +314,10 @@ void GateRF3ActorV2::BeginOfEventAction(const G4Event *event) {
 
 void GateRF3ActorV2::SteppingAction(G4Step *step) {
   G4Track *track = step->GetTrack();
-  if (track->GetKineticEnergy() <= 0.0){
+  if ((track->GetKineticEnergy() <= 0.0)
+      || (track->GetDefinition() != G4Gamma::Definition())) {
     return;
   }
-
-  // Optionally restrict to photons:
-  // if (track->GetDefinition() != G4Gamma::Definition()) {
-  //   return;
-  // }
 
   auto &tls = fThreadLocalData.Get();
   auto &hasScattered = tls.hasScattered;
@@ -245,16 +329,31 @@ void GateRF3ActorV2::SteppingAction(G4Step *step) {
     scattered = it->second;
   }
 
-  // Update scatter flag if this step is caused by a scattering process.
+  // Mark as scattered when the photon leaves the primary (uncollided) beam.
+  // Secondaries are never primary beam by definition.
+  if (track->GetCurrentStepNumber() == 1) {
+    if (track->GetParentID() > 0 || track->GetCreatorProcess() != nullptr) {
+      scattered = true;
+      hasScattered[trackID] = true;
+    }
+  }
+
+  // Update scatter flag if this step is caused by a gamma EM interaction.
   auto *pre = step->GetPreStepPoint();
   auto *post = step->GetPostStepPoint();
   auto *scatterProcess = post->GetProcessDefinedStep();
   if (scatterProcess) {
-    auto processName = scatterProcess->GetProcessName();
-    // For photons: flag Compton, photoelectric, Rayleigh as "scattered".
-    if (processName == "compt" || processName == "phot" || processName == "Rayl") {
-      scattered = true;
-      hasScattered[trackID] = scattered;
+    if (scatterProcess->GetProcessType() == fElectromagnetic) {
+      const auto st = scatterProcess->GetProcessSubType();
+      // "Uncollided -> collided" for gammas: any EM interaction.
+      if (st == fComptonScattering ||
+          st == fRayleigh ||
+          st == fPhotoElectricEffect ||
+          st == fGammaConversion ||
+          st == fGammaGeneralProcess) {
+        scattered = true;
+        hasScattered[trackID] = true;
+      }
     }
   }
 
@@ -263,48 +362,44 @@ void GateRF3ActorV2::SteppingAction(G4Step *step) {
   auto postPos = post->GetPosition();
   auto kineticEnergy = pre->GetKineticEnergy();
 
-  // std::vector<size_t> voxelIndices = this->tracer->trace(
-	// 			(glm::vec3(prePos[0], prePos[1], prePos[2]) + this->halfFieldDims) / glm::vec3(1000),
-	//       (glm::vec3(postPos[0], postPos[1], postPos[2]) + this->halfFieldDims) / glm::vec3(1000)
-  //     );
+  std::vector<size_t> voxelIndices = this->tracer->trace(
+				(glm::vec3(prePos[0], prePos[1], prePos[2]) + this->halfFieldDims) / glm::vec3(1000),
+	      (glm::vec3(postPos[0], postPos[1], postPos[2]) + this->halfFieldDims) / glm::vec3(1000)
+      );
+  // auto voxelHits = static_cast<RadFiled3D::DDAGridTracer*>(this->tracer.get())->trace_with_lengths(
+  //   (glm::vec3(prePos[0], prePos[1], prePos[2]) + this->halfFieldDims) / glm::vec3(1000),
+  //   (glm::vec3(postPos[0], postPos[1], postPos[2]) + this->halfFieldDims) / glm::vec3(1000)
+  // );
 
-  auto voxelHits = static_cast<RadFiled3D::DDAGridTracer*>(this->tracer.get())->trace_with_lengths(
-    (glm::vec3(prePos[0], prePos[1], prePos[2]) + this->halfFieldDims) / glm::vec3(1000),
-    (glm::vec3(postPos[0], postPos[1], postPos[2]) + this->halfFieldDims) / glm::vec3(1000)
-  );
-
-  // Energy fluence estimator: accumulate E * length for each segment.
-  for (const auto& hit : voxelHits) {
-    std::unique_lock lock((*this->mutexes)[hit.index]);
-    auto &regionVoxel = this->generalChannel
-                            ->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("voxel_region", hit.index)
-                            .get_data();
-    VoxelRegion region = static_cast<VoxelRegion>(regionVoxel);
-    this->AccumulateVoxelHit(hit.index, kineticEnergy, hit.length, region, scattered);
+  // Used for all voxels
+  size_t binIndex = static_cast<size_t>(kineticEnergy / this->binWidth);
+  if (binIndex >= this->numBins) {
+    binIndex = this->numBins - 1;
   }
 
-   // Optional: periodically check if statistical criterion is met.
-  if (this->evaluationFlag.load())
-  {
-    this->MaybeEvaluateAndStop();
+  for (const auto& voxelIndex : voxelIndices) {
+    this->AccumulateVoxelHit(voxelIndex, kineticEnergy, scattered, binIndex);
   }
 }
 
-void GateRF3ActorV2::AccumulateVoxelHit(size_t voxelIndex, float kineticEnergy, float segment_length, VoxelRegion region, bool scattered){
+void GateRF3ActorV2::AccumulateVoxelHit(size_t voxelIndex, float kineticEnergy, bool scattered, size_t binIndex){
+  // voxel_region is static after InitializeVoxelRegions(); safe to read without lock.
+  auto &regionVoxel = this->generalChannel
+                          ->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("voxel_region", voxelIndex)
+                          .get_data();
+  VoxelRegion region = static_cast<VoxelRegion>(regionVoxel);
+
+  this->numberOfHits.fetch_add(1);
+
+  std::lock_guard<std::mutex> lock((*this->mutexes)[voxelIndex]);
   auto& generalHits = this->generalChannel->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("hits", voxelIndex).get_data();
   auto& generalVoxelEnergy = this->generalChannel->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("energies", voxelIndex);
   auto& generalVoxelHist = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histograms", voxelIndex);      
-  
+
   // Basic tallies.
-  this->numberOfHits.fetch_add(1);
+
   generalHits += 1;
   generalVoxelEnergy += kineticEnergy;
-
-  // Energy bin for local spectrum.
-  size_t binIndex = static_cast<size_t>(kineticEnergy / this->binWidth);
-  if (binIndex >= this->numBins) {
-    binIndex = this->numBins - 1;  // Clamp to max bin
-  }
 
   auto* generalHistData = &generalVoxelHist.get_data();
   generalHistData[binIndex] += 1.f;
@@ -319,33 +414,33 @@ void GateRF3ActorV2::AccumulateVoxelHit(size_t voxelIndex, float kineticEnergy, 
     auto& beamHist = this->beamChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histograms", voxelIndex);      
     auto* beamHistData = &beamHist.get_data();
     beamHistData[binIndex] += 1.f;
-    auto &sumEL = this->beamChannel
-                      ->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("energy_fluence", voxelIndex)
-                      .get_data();
-    sumEL += kineticEnergy * segment_length;
+    // auto &sumEL = this->beamChannel
+    //                   ->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("energy_fluence", voxelIndex)
+    //                   .get_data();
+    // sumEL += kineticEnergy * segmentLength;
   } else {
     // Already scattered -> assign to OBJECT or ROOM.
-    if (region == VoxelRegion::OBJECT) {
+    if (region == VoxelRegion::OBJECT || region == VoxelRegion::ENCLOSURE) {
       auto &energyObject = this->objectChannel->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("energies",voxelIndex).get_data();
       energyObject += kineticEnergy;
       auto& objectHist = this->objectChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histograms", voxelIndex);      
       auto* objectHistData = &objectHist.get_data();
       objectHistData[binIndex] += 1.f;
-      auto &sumEL = this->objectChannel
-                        ->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("energy_fluence", voxelIndex)
-                        .get_data();
-      sumEL += kineticEnergy * segment_length;
+      // auto &sumEL = this->objectChannel
+      //                   ->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("energy_fluence", voxelIndex)
+      //                   .get_data();
+      // sumEL += kineticEnergy * segmentLength;
     } else {
-      // Everything not marked OBJECT is treated as ROOM (including WORLD).
+      // Everything not marked OBJECT or ENCLOSURE is treated as ROOM (= WORLD).
       auto &energyRoom = this->roomChannel->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("energies",voxelIndex).get_data();
       energyRoom += kineticEnergy;
       auto& roomHist = this->roomChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histograms", voxelIndex);      
       auto* roomHistData = &roomHist.get_data();
       roomHistData[binIndex] += 1.f;
-      auto &sumEL = this->roomChannel
-                        ->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("energy_fluence", voxelIndex)
-                        .get_data();
-      sumEL += kineticEnergy * segment_length;
+      // auto &sumEL = this->roomChannel
+      //                   ->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("energy_fluence", voxelIndex)
+      //                   .get_data();
+      // sumEL += kineticEnergy * segmentLength;
     }
   }
 
@@ -374,6 +469,21 @@ void GateRF3ActorV2::AccumulateVoxelHit(size_t voxelIndex, float kineticEnergy, 
 
 }
 
+bool GateRF3ActorV2::ShouldIncludeRegion(VoxelRegion region) const {
+  switch (this->convergenceRegionMode) {
+    case ConvergenceRegionMode::ALL:
+      return true;
+    case ConvergenceRegionMode::NO_ENCLOSURE:
+      return region != VoxelRegion::ENCLOSURE;
+    case ConvergenceRegionMode::NO_OBJECTS:
+      return region != VoxelRegion::OBJECT;
+    case ConvergenceRegionMode::NO_ENCLOSURE_NO_OBJECTS:
+      return (region != VoxelRegion::ENCLOSURE) && (region != VoxelRegion::OBJECT);
+    default:
+      return true;
+  }
+}
+
 void GateRF3ActorV2::MaybeEvaluateAndStop() {
   // Only one thread should evaluate at a time.
   if (this->evalMutex.try_lock())
@@ -385,29 +495,62 @@ void GateRF3ActorV2::MaybeEvaluateAndStop() {
       std::vector<float> errors;
       errors.reserve(this->numVoxels);
 
-      // Compute eps_rel per voxel from accumulated M2 and counts.
+      // Snapshot per-voxel stats under lock; compute eps_rel without holding locks.
+      std::vector<float> epsRelSnapshot(this->numVoxels, this->DEFAULT_ERROR_VALUE);
+      std::vector<bool> includeVoxel(this->numVoxels, false);
       for (size_t i = 0; i < this->numVoxels; i++)
       {
-        // Use shared_lock for reading during evaluation
-        std::shared_lock read_lock((*this->mutexes)[i]);
+        int updateCounts = 0;
+        std::vector<float> variancesSnapshot;
 
-        auto& updateCounts = this->generalChannel->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("update_counts", i).get_data();
-        
-        if (updateCounts <= this->MIN_UPDATE_COUNTS) {
-          // Not enough updates -> assign default error.
-          errors.push_back(this->DEFAULT_ERROR_VALUE);
+        {
+          // Short lock to copy the data needed for evaluation.
+          std::lock_guard<std::mutex> lock((*this->mutexes)[i]);
+          auto &regionVoxel = this->generalChannel
+                                  ->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("voxel_region", i)
+                                  .get_data();
+          VoxelRegion region = static_cast<VoxelRegion>(regionVoxel);
+          if (!this->ShouldIncludeRegion(region)) {
+            continue;
+          }
+          includeVoxel[i] = true;
+
+          updateCounts = this->generalChannel
+                             ->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("update_counts", i)
+                             .get_data();
+          if (updateCounts > this->MIN_UPDATE_COUNTS) {
+            auto &variances = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histogram_variances", i);
+            auto *variancesData = &variances.get_data();
+            variancesSnapshot.assign(variancesData, variancesData + this->numBins);
+          }
+        }
+
+        float epsRelValue = this->DEFAULT_ERROR_VALUE;
+        if (updateCounts > this->MIN_UPDATE_COUNTS) {
+          float sumM2OverCounts = 0.f;
+          for (size_t j = 0; j < this->numBins; j++) {
+            sumM2OverCounts += variancesSnapshot[j] / updateCounts;
+          }
+          epsRelValue = sumM2OverCounts * (this->VARIANCE_SCALING_FACTOR / this->numBins);
+        }
+        epsRelSnapshot[i] = epsRelValue;
+        errors.push_back(epsRelValue);
+      }
+
+      if (errors.empty()) {
+        G4cout << "[RF3Actor] No voxels selected for convergence check; skipping." << G4endl;
+        this->evalMutex.unlock();
+        return;
+      }
+
+      // Write eps_rel back to the grid with short per-voxel locks.
+      for (size_t i = 0; i < this->numVoxels; i++) {
+        if (!includeVoxel[i]) {
           continue;
         }
-
-        float sumM2OverCounts = 0.f;
-        auto& variances = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histogram_variances", i);
-        auto* variancesData = &variances.get_data();
-        for (size_t j = 0; j < this->numBins; j++) {
-          sumM2OverCounts += variancesData[j] / updateCounts;
-        }
-        auto& epsRel = this->generalChannel->get_voxel_flat<float>("eps_rel", i);
-        epsRel = sumM2OverCounts * (this->VARIANCE_SCALING_FACTOR / this->numBins);
-        errors.push_back(epsRel);
+        std::lock_guard<std::mutex> lock((*this->mutexes)[i]);
+        auto &epsRel = this->generalChannel->get_voxel_flat<float>("eps_rel", i);
+        epsRel = epsRelSnapshot[i];
       }
 
       // Evaluate chosen percentile of epsRel.
@@ -431,11 +574,11 @@ void GateRF3ActorV2::MaybeEvaluateAndStop() {
       // ----- Neue, verständliche Logs -----
       G4cout << "\n[RF3Actor] ===== Statistical convergence check =====" << G4endl;
       G4cout << "[RF3Actor] Primary photons simulated : " << currentAbsorbedEvents << " (events)" << G4endl;
-      G4cout << "[RF3Actor] Number of voxels : " << this->numVoxels << G4endl;
+      G4cout << "[RF3Actor] Number of voxels (in check) : " << errors.size() << G4endl;
       G4cout << "[RF3Actor] Target eps_rel quantile : " << (relErrorPercentile * 100.0f) << " %" << G4endl;
       G4cout << "[RF3Actor] Target eps_rel threshold : " << relErrorThreshold << " %" << G4endl;
       G4cout << "[RF3Actor] Measured eps_rel at quantile : " << quantileValue << G4endl;
-      G4cout << "[RF3Actor] Voxels below threshold (eps_rel < " << relErrorThreshold << "): " << numBelow << " / " << this->numVoxels << " (" << cleared_percentage << " %)" << G4endl;
+      G4cout << "[RF3Actor] Voxels below threshold (eps_rel < " << relErrorThreshold << "): " << numBelow << " / " << errors.size() << " (" << cleared_percentage << " %)" << G4endl;
 
       bool stop = (quantileValue <= this->relErrorThreshold);
       if (stop) {
@@ -451,6 +594,11 @@ void GateRF3ActorV2::MaybeEvaluateAndStop() {
 
 void GateRF3ActorV2::EndOfEventAction(const G4Event *event) {
   // If a stop was requested, ask the source manager to terminate the run.
+   // Optional: periodically check if statistical criterion is met.
+  if (this->evaluationFlag.load())
+  {
+    this->MaybeEvaluateAndStop();
+  }
   if (runTerminationFlag.load()){
     fSourceManager->SetRunTerminationFlag(true);
   }
@@ -465,11 +613,15 @@ void GateRF3ActorV2::StopSimulation() {
 // }
 
 void GateRF3ActorV2::EndSimulationAction() {
+  const std::string geometryInfo = "convergence_region_mode=" + this->convergenceRegionModeString +
+                                   ", rel_error_threshold=" + std::to_string(this->relErrorThreshold) +
+                                   ", rel_error_percentile=" + std::to_string(this->relErrorPercentile);
+
   // Minimal metadata for now; can be extended with real simulation info.
   std::shared_ptr<RadFiled3D::Storage::RadiationFieldMetadata> metadata = std::make_shared<RadFiled3D::Storage::V1::RadiationFieldMetadata>(
 		RadFiled3D::Storage::FiledTypes::V1::RadiationFieldMetadataHeader::Simulation(
 			static_cast<int>(this->numberOfAbsorbedEvents.load()),  // Number of primary particles
-			"", // Geometry Infos
+			geometryInfo, // Geometry Infos
 			"", // Physics List
 			RadFiled3D::Storage::FiledTypes::V1::RadiationFieldMetadataHeader::Simulation::XRayTube(
 				glm::vec3(0.f, 0.f, 0.f), // Translation
@@ -494,7 +646,7 @@ void GateRF3ActorV2::EndSimulationAction() {
   this->generalChannel->remove_layer("eps_rel");
   this->generalChannel->remove_layer("histogram_variances");
   this->generalChannel->remove_layer("histogram_variances_means");
-  this->generalChannel->remove_layer("energy_fluence");
+  // this->generalChannel->remove_layer("energy_fluence");
   
   this->generalChannel->remove_layer("hits");
   this->beamChannel->remove_layer("hits");

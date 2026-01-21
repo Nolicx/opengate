@@ -104,3 +104,5 @@ target_link_libraries(opengate_core PRIVATE pybind11::module ${Geant4_LIBRARIES}
 add_subdirectory(../../RadFiled3D ${CMAKE_BINARY_DIR}/RadFiled3D)
 target_link_libraries(opengate_core PRIVATE libRadFiled3D)
 target_include_directories(opengate_core PRIVATE ../../RadFiled3D/include)
+
+target_include_directories(opengate_core PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../tqdm/include)
