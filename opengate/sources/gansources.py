@@ -10,14 +10,12 @@ import bisect
 import random
 
 import opengate_core as g4
-from .phspsources import PhaseSpaceSource
 from ..exception import fatal
 from .generic import GenericSource
 from ..image import get_info_from_image
 from ..image import compute_image_3D_CDF
 from ..utility import LazyModuleLoader
 from ..base import process_cls
-
 
 #
 torch = LazyModuleLoader("torch")
