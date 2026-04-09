@@ -116,7 +116,7 @@ from .actors.digitizers import (
     DigiAttributeProcessDefinedStepInVolumeActor,
 )
 
-from .actors.rf3actors import RF3Actor, RF3ActorV2
+from .actors.aidosactors import AIDosActor
 
 particle_names_Gate_to_G4 = {
     "gamma": "gamma",
@@ -160,9 +160,8 @@ actor_types = {
     "BremsstrahlungSplittingActor": BremsstrahlungSplittingActor,
     "GammaFreeFlightActor": GammaFreeFlightActor,
     "ScatterSplittingFreeFlightActor": ScatterSplittingFreeFlightActor,
-    
-    "RF3Actor": RF3Actor,
-    "RF3ActorV2": RF3ActorV2,
+
+    "AIDosActor": AIDosActor,
 }
 
 
