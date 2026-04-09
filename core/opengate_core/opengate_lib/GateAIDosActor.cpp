@@ -544,8 +544,6 @@ void GateAIDosActor::FinalizeQuantities(RadFiled3D::VoxelGridBuffer* ch) {
         }
         ch->remove_layer("step_lengths");
     }
-    ch->remove_layer("hits");
-    ch->remove_layer("histograms");
 }
 
 void GateAIDosActor::StopSimulation() {
