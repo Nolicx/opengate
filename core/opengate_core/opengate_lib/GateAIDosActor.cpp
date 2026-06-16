@@ -228,8 +228,8 @@ std::shared_ptr<RadFiled3D::VoxelGridBuffer> GateAIDosActor::CreateEnergyChannel
   channel->add_layer<float>("transported_energy", 0.f, "MeV");
 
   if (this->needsStepLengths)
-      channel->add_custom_layer<RadFiled3D::HistogramVoxel>(
-          "step_lengths", RadFiled3D::HistogramVoxel(numBins, binWidth, nullptr), 0.f, "cm");
+      channel->add_custom_layer<RadFiled3D::HistogramVoxel<float>>(
+          "step_lengths", RadFiled3D::HistogramVoxel<float>(numBins, binWidth, nullptr), 0.f, "cm");
 
   if (this->scoringQuantities.count("energy_fluence"))
       channel->add_layer<float>("energy_fluence", 0.f, "MeV/cm2");
@@ -246,13 +246,13 @@ std::shared_ptr<RadFiled3D::VoxelGridBuffer> GateAIDosActor::CreateGeneralChanne
 
   // Convergence tracking (generalChannel only)
   channel->add_layer<int>("hits", 0, "counts");
-  channel->add_custom_layer<RadFiled3D::HistogramVoxel>(
-      "histograms", RadFiled3D::HistogramVoxel(numBins, binWidth, nullptr), 0.f, "MeV");
+  channel->add_custom_layer<RadFiled3D::HistogramVoxel<float>>(
+      "histograms", RadFiled3D::HistogramVoxel<float>(numBins, binWidth, nullptr), 0.f, "MeV");
   channel->add_layer<int>("update_counts", 0, "counts");
-  channel->add_custom_layer<RadFiled3D::HistogramVoxel>(
-      "histogram_variances_means", RadFiled3D::HistogramVoxel(numBins, binWidth, nullptr), 0.f, "variances_means");
-  channel->add_custom_layer<RadFiled3D::HistogramVoxel>(
-      "histogram_variances", RadFiled3D::HistogramVoxel(numBins, binWidth, nullptr), 0.f, "variances");
+  channel->add_custom_layer<RadFiled3D::HistogramVoxel<float>>(
+      "histogram_variances_means", RadFiled3D::HistogramVoxel<float>(numBins, binWidth, nullptr), 0.f, "variances_means");
+  channel->add_custom_layer<RadFiled3D::HistogramVoxel<float>>(
+      "histogram_variances", RadFiled3D::HistogramVoxel<float>(numBins, binWidth, nullptr), 0.f, "variances");
   channel->add_layer<float>("eps_rel", 1.f, "percent");
 
   // Voxel region labels — written once in InitializeVoxelRegions, kept in output
@@ -474,7 +474,7 @@ void GateAIDosActor::AccumulateVoxelHits(size_t voxelIndex, float segmentLengthC
 
   auto& generalHits = this->generalChannel->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("hits", voxelIndex).get_data();
   auto& generalTransportedEnergy = this->generalChannel->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("transported_energy", voxelIndex);
-  auto& generalVoxelHist = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histograms", voxelIndex);
+  auto& generalVoxelHist = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel<float>>("histograms", voxelIndex);
 
   generalHits += 1;
   generalTransportedEnergy += energyMeV;
@@ -492,16 +492,16 @@ void GateAIDosActor::AccumulateVoxelHits(size_t voxelIndex, float segmentLengthC
   targetChannel->get_voxel_flat<RadFiled3D::ScalarVoxel<float>>("transported_energy", voxelIndex).get_data() += energyMeV;
 
   if (this->needsStepLengths) {
-      auto* sl = &targetChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("step_lengths", voxelIndex).get_data();
+      auto* sl = &targetChannel->get_voxel_flat<RadFiled3D::HistogramVoxel<float>>("step_lengths", voxelIndex).get_data();
       sl[binIndex] += segmentLengthCm;
-      auto* slGeneral = &this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("step_lengths", voxelIndex).get_data();
+      auto* slGeneral = &this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel<float>>("step_lengths", voxelIndex).get_data();
       slGeneral[binIndex] += segmentLengthCm;
   }
 
   if (generalHits % this->updateHistogramsThreshold == 0) {
     auto& updateCounts       = this->generalChannel->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("update_counts", voxelIndex).get_data();
-    auto& variancesVoxel     = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histogram_variances", voxelIndex);
-    auto& variancesMeansVoxel = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histogram_variances_means", voxelIndex);
+    auto& variancesVoxel     = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel<float>>("histogram_variances", voxelIndex);
+    auto& variancesMeansVoxel = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel<float>>("histogram_variances_means", voxelIndex);
 
     auto* variancesData      = &variancesVoxel.get_data();
     auto* variancesMeansData = &variancesMeansVoxel.get_data();
@@ -528,7 +528,7 @@ void GateAIDosActor::FinalizeQuantities(RadFiled3D::VoxelGridBuffer* ch) {
         const float norm      = this->voxelVolumeCm3 * static_cast<float>(this->numberOfAbsorbedEvents.load());
 
         for (size_t i = 0; i < numVoxels; i++) {
-            auto* sl = &ch->get_voxel_flat<RadFiled3D::HistogramVoxel>("step_lengths", i).get_data();
+            auto* sl = &ch->get_voxel_flat<RadFiled3D::HistogramVoxel<float>>("step_lengths", i).get_data();
             float sumEjLj = 0.f, sumH10Lj = 0.f, sumKermaLj = 0.f;
             for (size_t j = 0; j < static_cast<size_t>(numBins); j++) {
                 float lj = sl[j];
@@ -591,7 +591,7 @@ void GateAIDosActor::MaybeEvaluateAndStop() {
 
   //     updateCounts = this->generalChannel->get_voxel_flat<RadFiled3D::ScalarVoxel<int>>("update_counts", i).get_data();
   //     if (updateCounts > this->MIN_UPDATE_COUNTS) {
-  //       auto &variances    = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel>("histogram_variances", i);
+  //       auto &variances    = this->generalChannel->get_voxel_flat<RadFiled3D::HistogramVoxel<float>>("histogram_variances", i);
   //       auto *variancesData = &variances.get_data();
   //       variancesSnapshot.assign(variancesData, variancesData + this->numBins);
   //     }
@@ -634,7 +634,7 @@ void GateAIDosActor::MaybeEvaluateAndStop() {
     float epsRelValue = this->DEFAULT_ERROR_VALUE;
     if (updateCounts > this->MIN_UPDATE_COUNTS) {
       auto* variancesData = &this->generalChannel
-          ->get_voxel_flat<RadFiled3D::HistogramVoxel>("histogram_variances", i).get_data();
+          ->get_voxel_flat<RadFiled3D::HistogramVoxel<float>>("histogram_variances", i).get_data();
       float sumM2OverCounts = 0.f;
       for (size_t j = 0; j < static_cast<size_t>(this->numBins); j++)
         sumM2OverCounts += variancesData[j] / updateCounts;
